@@ -1,18 +1,48 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { API_URL } from '../utils/config';
+import { Platform } from 'react-native';
+
+// Determine if we're in a production build
+const isProduction = !__DEV__;
+
+// Log for both dev and production
+const logAPI = (message, data) => {
+    if (__DEV__) {
+        console.log(message, data);
+    } else {
+        // In production, still log important API events but with less detail
+        console.log(message);
+    }
+};
+
+// Get the appropriate API URL based on environment
+const getAPIUrl = () => {
+    // For production Android, ensure we're using https
+    if (isProduction && Platform.OS === 'android') {
+        // Make sure API_URL is https
+        if (API_URL.startsWith('http:')) {
+            return API_URL.replace('http:', 'https:');
+        }
+    }
+    return API_URL;
+};
 
 const api = axios.create({
-    baseURL: API_URL,
+    baseURL: getAPIUrl(),
     headers: {
         'Content-Type': 'application/json',
     },
-    withCredentials: false
+    withCredentials: false,
+    // Add timeouts for production builds
+    timeout: isProduction ? 30000 : 0, // 30 seconds timeout in production
 });
 
 // Add token to requests
 api.interceptors.request.use(async (config) => {
     try {
+        logAPI('API Request:', config.url);
+
         const token = await SecureStore.getItemAsync('authToken');
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
@@ -30,8 +60,19 @@ api.interceptors.request.use(async (config) => {
 
 // Handle response errors
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        logAPI('API Response Success:', response.config.url);
+        return response;
+    },
     async (error) => {
+        // Log detailed error information
+        console.error('API Error:', {
+            url: error.config?.url,
+            status: error.response?.status,
+            message: error.message,
+            data: error.response?.data
+        });
+
         const originalRequest = error.config;
 
         // If the error is 401 and we haven't tried to refresh the token yet
@@ -42,7 +83,7 @@ api.interceptors.response.use(
                 // Try to refresh the token
                 const refreshToken = await SecureStore.getItemAsync('refreshToken');
                 if (refreshToken) {
-                    const response = await axios.post(`${API_URL}/auth/refresh-token`, {
+                    const response = await axios.post(`${getAPIUrl()}/auth/refresh-token`, {
                         refreshToken
                     });
 
@@ -70,7 +111,7 @@ api.interceptors.response.use(
     }
 );
 
-// Log API calls in development
+// Additional logging for development
 if (__DEV__) {
     api.interceptors.request.use(request => {
         console.log('Starting Request:', request);

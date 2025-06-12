@@ -1,5 +1,5 @@
-import { Platform, Dimensions } from 'react-native';
-import DeviceInfo from 'react-native-device-info';
+import { Platform } from 'react-native';
+import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DEVICE_ID_KEY = '@device_id';
@@ -11,12 +11,13 @@ export const generateDeviceId = async () => {
 
         if (!deviceId) {
             // Generate new device ID using device info
-            const uniqueId = await DeviceInfo.getUniqueId();
-            const brand = await DeviceInfo.getBrand();
-            const model = await DeviceInfo.getModel();
-            const systemVersion = await DeviceInfo.getSystemVersion();
+            const deviceName = Device.deviceName || 'Unknown Device';
+            const brand = Device.brand || 'Unknown';
+            const model = Device.modelName || 'Unknown';
+            const systemVersion = Device.osVersion || 'Unknown';
+            const uniqueId = `${brand}-${model}-${systemVersion}-${Date.now()}`.replace(/\s+/g, '-');
 
-            deviceId = `${brand}-${model}-${systemVersion}-${uniqueId}`.replace(/\s+/g, '-');
+            deviceId = uniqueId;
             await AsyncStorage.setItem(DEVICE_ID_KEY, deviceId);
         }
 
@@ -33,18 +34,19 @@ export const generateDeviceId = async () => {
 export const getDeviceInfo = async () => {
     try {
         const deviceId = await generateDeviceId();
-        const brand = await DeviceInfo.getBrand();
-        const model = await DeviceInfo.getModel();
-        const systemVersion = await DeviceInfo.getSystemVersion();
-        const appVersion = await DeviceInfo.getVersion();
+        const deviceName = Device.deviceName || 'Unknown Device';
+        const brand = Device.brand || 'Unknown';
+        const model = Device.modelName || 'Unknown';
+        const systemVersion = Device.osVersion || 'Unknown';
         const deviceType = Platform.OS === 'ios' ? 'ios' : 'android';
 
         return {
             deviceId,
-            deviceName: `${brand} ${model}`,
+            deviceName,
             deviceType,
             os: `${deviceType} ${systemVersion}`,
-            appVersion
+            brand,
+            model
         };
     } catch (error) {
         console.error('Error getting device info:', error);
@@ -53,7 +55,8 @@ export const getDeviceInfo = async () => {
             deviceName: 'Unknown Device',
             deviceType: 'other',
             os: 'Unknown',
-            appVersion: '1.0.0'
+            brand: 'Unknown',
+            model: 'Unknown'
         };
     }
 }; 

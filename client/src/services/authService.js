@@ -12,9 +12,9 @@ export const authService = {
     },
 
     // Login user
-    login: async (email, password) => {
+    login: async (loginData) => {
         try {
-            const response = await api.post('/auth/login', { email, password });
+            const response = await api.post('/auth/login', loginData);
             return response.data;
         } catch (error) {
             throw error.response?.data || error.message;

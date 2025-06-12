@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { authService } from '../services/authService';
+import { getDeviceInfo } from '../utils/deviceUtils';
 
 // Create the context
 export const AuthContext = createContext();
@@ -68,7 +69,18 @@ export const AuthProvider = ({ children }) => {
             setIsLoading(true);
             setError(null);
 
-            const response = await authService.login(email, password);
+            // Get device information
+            const deviceInfo = await getDeviceInfo();
+
+            // Prepare login request
+            const loginData = {
+                email,
+                password,
+                deviceId: deviceInfo.deviceId,
+                deviceName: deviceInfo.deviceName
+            };
+
+            const response = await authService.login(loginData);
 
             if (response.token && response.user) {
                 await SecureStore.setItemAsync('user', JSON.stringify(response.user));

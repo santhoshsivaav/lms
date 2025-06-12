@@ -17,25 +17,11 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthContext } from '../../context/AuthContext';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+import { getDeviceInfo } from '../../utils/deviceUtils';
 
-// Function to get device information
-const getDeviceInfo = async () => {
-    try {
-        const deviceId = await Device.getDeviceIdAsync();
-        const deviceName = Device.deviceName || 'Unknown Device';
-        return {
-            deviceId,
-            deviceName
-        };
-    } catch (error) {
-        console.error('Error getting device info:', error);
-        return {
-            deviceId: 'unknown',
-            deviceName: 'Unknown Device'
-        };
-    }
-};
+// Get API URL from app config
+const API_URL = Constants.expoConfig.extra.apiUrl || 'https://lms-yunus-app.onrender.com/api';
 
 const LoginScreen = ({ navigation }) => {
     const [email, setEmail] = useState('');
@@ -65,57 +51,15 @@ const LoginScreen = ({ navigation }) => {
         try {
             // Get device information
             const deviceInfo = await getDeviceInfo();
+            console.log('Device info:', deviceInfo);
 
-            // Attempt login with device info
-            const response = await fetch(`${API_URL}/api/auth/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    email,
-                    password,
-                    deviceId: deviceInfo.deviceId,
-                    deviceName: deviceInfo.deviceName
-                }),
-            });
+            // Call the login function from AuthContext
+            const success = await login(email, password);
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                if (response.status === 403) {
-                    Alert.alert(
-                        'Device Limit Reached',
-                        'You have reached the maximum number of devices. Please remove a device from your account to continue.',
-                        [
-                            {
-                                text: 'Manage Devices',
-                                onPress: () => navigation.navigate('Profile', { screen: 'DeviceManagement' })
-                            },
-                            {
-                                text: 'Cancel',
-                                style: 'cancel'
-                            }
-                        ]
-                    );
-                } else {
-                    throw new Error(data.message || 'Login failed');
-                }
-                return;
-            }
-
-            // Login successful - store the token and user data in parallel
-            if (data.data && data.data.token && data.data.user) {
-                await Promise.all([
-                    AsyncStorage.setItem('user', JSON.stringify(data.data.user)),
-                    AsyncStorage.setItem('token', data.data.token),
-                    login(data.data.token, data.data.user)
-                ]);
-
-                // Navigate to Home screen immediately after successful login
-                navigation.replace('Home');
+            if (success) {
+                navigation.replace('Main');
             } else {
-                throw new Error('Invalid response format');
+                Alert.alert('Error', 'Login failed. Please check your credentials.');
             }
         } catch (error) {
             console.error('Login error:', error);
@@ -182,12 +126,7 @@ const LoginScreen = ({ navigation }) => {
                             )}
                         </TouchableOpacity>
 
-                        <View style={styles.registerContainer}>
-                            <Text style={styles.registerText}>Don't have an account? </Text>
-                            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-                                <Text style={styles.registerLink}>Register</Text>
-                            </TouchableOpacity>
-                        </View>
+                        
                     </View>
                 </View>
             </TouchableWithoutFeedback>

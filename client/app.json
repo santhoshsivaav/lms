@@ -32,19 +32,30 @@
         "WRITE_EXTERNAL_STORAGE",
         "CAMERA",
         "RECORD_AUDIO",
-        "MODIFY_AUDIO_SETTINGS"
+        "MODIFY_AUDIO_SETTINGS",
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE",
+        "ACCESS_NETWORK_STATE"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
-      }
+      },
+      "softwareKeyboardLayoutMode": "pan",
+      "allowBackup": true,
+      "enableProguardInReleaseBuilds": true,
+      "enableShrinkResources": true,
+      "enableR8": true
     },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone.",
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera.",
-        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos."
+        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "plugins": [
@@ -54,7 +65,8 @@
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone.",
           "videoPlayer": {
             "enableBackgroundPlayback": true,
-            "enablePictureInPicture": true
+            "enablePictureInPicture": true,
+            "androidImplementation": "ExoPlayer"
           }
         }
       ],

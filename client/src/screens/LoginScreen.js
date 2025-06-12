@@ -9,7 +9,7 @@ import {
     ActivityIndicator
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { API_URL } from '../config';
+import { API_URL } from '../utils/config';
 import { getDeviceInfo } from '../utils/deviceUtils';
 import { authService } from '../services/authService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,7 +32,7 @@ const LoginScreen = ({ navigation }) => {
             const deviceInfo = await getDeviceInfo();
 
             // Attempt login with device info
-            const response = await fetch(`${API_URL}/api/auth/login`, {
+            const response = await fetch(`${API_URL}/auth/login`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -122,14 +122,7 @@ const LoginScreen = ({ navigation }) => {
                     )}
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={styles.registerButton}
-                    onPress={() => navigation.navigate('Register')}
-                >
-                    <Text style={styles.registerButtonText}>
-                        Don't have an account? Register
-                    </Text>
-                </TouchableOpacity>
+                
             </View>
         </View>
     );

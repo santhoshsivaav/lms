@@ -10,7 +10,7 @@ import {
     RefreshControl
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { API_URL } from '../config';
+import { API_URL } from '../utils/config';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { format } from 'date-fns';
 
