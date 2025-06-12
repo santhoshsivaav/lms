@@ -8,4 +8,15 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000 
+        value: 10000
+
+  - type: web
+    name: lms-admin
+    env: node
+    buildCommand: cd admin && npm install && npm run build
+    startCommand: cd admin && npx serve -s build
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000 
