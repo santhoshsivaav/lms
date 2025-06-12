@@ -71,7 +71,7 @@ const upload = multer({
     limits: {
         fileSize: file => {
             if (file.fieldname === 'video') {
-                return 500 * 1024 * 1024; // 500MB for videos
+                return 600 * 1024 * 1024; // 600MB for videos
             }
             return 5 * 1024 * 1024; // 5MB for images
         }

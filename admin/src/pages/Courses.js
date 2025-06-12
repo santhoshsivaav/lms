@@ -36,6 +36,7 @@ import {
     MenuItem,
     Stack,
     Divider,
+    LinearProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -87,6 +88,7 @@ const Courses = () => {
     });
     const [videoFile, setVideoFile] = useState(null);
     const [uploadingVideo, setUploadingVideo] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(0);
 
     useEffect(() => {
         fetchCourses();
@@ -235,31 +237,61 @@ const Courses = () => {
         const file = event.target.files[0];
         if (file) {
             setUploadingVideo(true);
+            setUploadProgress(0);
             try {
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('upload_preset', 'lms_app');
-                formData.append('cloud_name', 'dzwr8crjj');
+                const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+                let uploadedChunks = 0;
+                let videoUrl = '';
 
-                // Determine resource type based on file type
-                const resourceType = file.type.startsWith('video/') ? 'video' : 'raw';
-                const response = await fetch(
-                    `https://api.cloudinary.com/v1_1/dzwr8crjj/${resourceType}/upload`,
-                    {
-                        method: 'POST',
-                        body: formData,
+                for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                    const start = chunkIndex * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, file.size);
+                    const chunk = file.slice(start, end);
+
+                    const formData = new FormData();
+                    formData.append('video', chunk);
+                    formData.append('chunkIndex', chunkIndex);
+                    formData.append('totalChunks', totalChunks);
+                    formData.append('fileName', file.name);
+
+                    const API_URL = process.env.REACT_APP_API_URL || 'https://lms-yunus-app.onrender.com/api';
+                    const response = await fetch(
+                        `${API_URL}/api/courses/upload-video`,
+                        {
+                            method: 'POST',
+                            body: formData,
+                            credentials: 'include',
+                            headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                            }
+                        }
+                    );
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.message || 'Upload failed');
                     }
-                );
 
-                const data = await response.json();
-                console.log('Upload response:', data);
+                    const data = await response.json();
+                    uploadedChunks++;
+
+                    // Update progress
+                    const progress = Math.round((uploadedChunks / totalChunks) * 100);
+                    setUploadProgress(progress);
+
+                    // If this is the last chunk, get the final video URL
+                    if (chunkIndex === totalChunks - 1) {
+                        videoUrl = data.videoUrl;
+                    }
+                }
 
                 if (moduleIndex !== undefined && lessonIndex !== undefined) {
                     // Editing existing lesson
                     const field = file.type.startsWith('video/') ? 'videoUrl' : 'pdfUrl';
                     const type = file.type.startsWith('video/') ? 'video' : 'pdf';
                     handleEditLesson(moduleIndex, lessonIndex, 'type', type);
-                    handleEditLesson(moduleIndex, lessonIndex, field, data.secure_url);
+                    handleEditLesson(moduleIndex, lessonIndex, field, videoUrl);
                 } else {
                     // Adding new lesson
                     const field = file.type.startsWith('video/') ? 'videoUrl' : 'pdfUrl';
@@ -269,16 +301,17 @@ const Courses = () => {
                         type: type,
                         content: {
                             ...prev.content,
-                            [field]: data.secure_url,
+                            [field]: videoUrl,
                             [field === 'videoUrl' ? 'pdfUrl' : 'videoUrl']: ''
                         }
                     }));
                 }
             } catch (err) {
                 console.error('Upload error:', err);
-                setError('Failed to upload file');
+                setError(err.message || 'Failed to upload file');
             } finally {
                 setUploadingVideo(false);
+                setUploadProgress(0);
             }
         }
     };
@@ -686,7 +719,7 @@ const Courses = () => {
                                         >
                                             <EditIcon />
                                         </IconButton>
-                                        
+
                                     </CardActions>
                                 </Card>
                             </Grid>
@@ -886,13 +919,20 @@ const Courses = () => {
                                                                         {uploadingVideo ? 'Uploading...' : `Replace ${lesson.type === 'video' ? 'Video' : 'PDF'}`}
                                                                     </Button>
                                                                 </label>
+                                                                {uploadingVideo && (
+                                                                    <Box sx={{ width: '100%', mt: 1 }}>
+                                                                        <LinearProgress variant="determinate" value={uploadProgress} />
+                                                                        <Typography variant="body2" color="text.secondary" align="center">
+                                                                            {uploadProgress}%
+                                                                        </Typography>
+                                                                    </Box>
+                                                                )}
+                                                                {(lesson.content?.videoUrl || lesson.content?.pdfUrl) && !uploadingVideo && (
+                                                                    <Alert severity="success">
+                                                                        {lesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
+                                                                    </Alert>
+                                                                )}
                                                             </Box>
-
-                                                            {(lesson.content?.videoUrl || lesson.content?.pdfUrl) && (
-                                                                <Alert severity="success">
-                                                                    {lesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
-                                                                </Alert>
-                                                            )}
                                                         </Stack>
                                                     </CardContent>
                                                 </Card>
@@ -974,7 +1014,15 @@ const Courses = () => {
                                                                         {uploadingVideo ? 'Uploading...' : `Upload ${currentLesson.type === 'video' ? 'Video' : 'PDF'}`}
                                                                     </Button>
                                                                 </label>
-                                                                {(currentLesson.content?.videoUrl || currentLesson.content?.pdfUrl) && (
+                                                                {uploadingVideo && (
+                                                                    <Box sx={{ width: '100%', mt: 1 }}>
+                                                                        <LinearProgress variant="determinate" value={uploadProgress} />
+                                                                        <Typography variant="body2" color="text.secondary" align="center">
+                                                                            {uploadProgress}%
+                                                                        </Typography>
+                                                                    </Box>
+                                                                )}
+                                                                {(currentLesson.content?.videoUrl || currentLesson.content?.pdfUrl) && !uploadingVideo && (
                                                                     <Alert severity="success" sx={{ mt: 1 }}>
                                                                         {currentLesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
                                                                     </Alert>

@@ -27,7 +27,7 @@ const storage = new CloudinaryStorage({
 const upload = multer({
     storage: storage,
     limits: {
-        fileSize: 100 * 1024 * 1024, // 100MB limit
+        fileSize: 600 * 1024 * 1024, // 600MB limit
     },
 });
 
@@ -37,26 +37,16 @@ const upload = multer({
  * @param {Object} options - Upload options
  * @returns {Promise<Object>} - Cloudinary upload result
  */
-const uploadImage = async (imagePath, options = {}) => {
+const uploadImage = async (filePath) => {
     try {
-        const defaultOptions = {
-            folder: 'lms-app/images',
+        const result = await cloudinary.uploader.upload(filePath, {
             resource_type: 'image',
-            transformation: [
-                { quality: 'auto' },
-                { fetch_format: 'auto' }
-            ]
-        };
-
-        const result = await cloudinary.uploader.upload(
-            imagePath,
-            { ...defaultOptions, ...options }
-        );
-
+            quality: 'auto'
+        });
         return result;
     } catch (error) {
-        console.error('Cloudinary image upload error:', error);
-        throw new Error('Failed to upload image to Cloudinary');
+        console.error('Error uploading to Cloudinary:', error);
+        throw error;
     }
 };
 
@@ -66,33 +56,27 @@ const uploadImage = async (imagePath, options = {}) => {
  * @param {Object} options - Upload options
  * @returns {Promise<Object>} - Cloudinary upload result
  */
-const uploadVideo = async (videoPath, options = {}) => {
+const uploadVideo = async (filePath) => {
     try {
-        const defaultOptions = {
-            folder: 'lms-app/videos',
+        const result = await cloudinary.uploader.upload(filePath, {
             resource_type: 'video',
+            chunk_size: 10000000, // 10MB chunks for better performance with large files
             eager: [
-                {
-                    format: 'mp4',
-                    transformation: [
-                        { quality: 'auto' },
-                        { streaming_profile: 'hd' }
-                    ]
-                }
+                { format: 'mp4', quality: 'auto' }
             ],
             eager_async: true,
-            eager_notification_url: process.env.CLOUDINARY_NOTIFICATION_URL
-        };
-
-        const result = await cloudinary.uploader.upload(
-            videoPath,
-            { ...defaultOptions, ...options }
-        );
-
+            timeout: 120000, // 120 seconds timeout for large files
+            upload_preset: 'video_upload',
+            resource_type: 'video',
+            invalidate: true,
+            use_filename: true,
+            unique_filename: true,
+            overwrite: true
+        });
         return result;
     } catch (error) {
-        console.error('Cloudinary video upload error:', error);
-        throw new Error('Failed to upload video to Cloudinary');
+        console.error('Error uploading to Cloudinary:', error);
+        throw error;
     }
 };
 

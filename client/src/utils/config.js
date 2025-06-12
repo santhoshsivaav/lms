@@ -9,7 +9,7 @@ export const APP_CONFIG = {
     name: 'LMS Platform',
     version: '1.0.0',
     supportEmail: 'support@lms.com',
-    maxFileSize: 100 * 1024 * 1024, // 100MB
+    maxFileSize: 600 * 1024 * 1024, // 600MB
     allowedFileTypes: {
         video: ['video/mp4', 'video/webm', 'video/ogg'],
         image: ['image/jpeg', 'image/png', 'image/gif'],

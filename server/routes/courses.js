@@ -14,6 +14,8 @@ const {
 const { protect, admin } = require('../middleware/auth');
 const Course = require('../models/Course');
 const cloudinary = require('cloudinary').v2;
+const { uploadVideo } = require('../utils/cloudinary');
+const fs = require('fs');
 // const { getEnrolledCourses: progressGetEnrolledCourses } = require('../controllers/progressController');
 
 // Configure Cloudinary
@@ -37,7 +39,7 @@ const storage = multer.diskStorage({
 const upload = multer({
     storage: storage,
     limits: {
-        fileSize: 500 * 1024 * 1024, // 500MB limit
+        fileSize: 600 * 1024 * 1024, // 600MB limit
     },
     fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith('video/') ||
@@ -63,5 +65,70 @@ router.get('/:id', getCourseById);
 router.post('/', protect, admin, upload.single('thumbnail'), createCourse);
 router.put('/:id', protect, admin, upload.single('thumbnail'), updateCourse);
 router.delete('/:id', protect, admin, deleteCourse);
+
+// Add new route for video upload
+router.post('/upload-video', protect, admin, upload.single('video'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No video file uploaded' });
+        }
+
+        const { chunkIndex, totalChunks, fileName } = req.body;
+        const isLastChunk = parseInt(chunkIndex) === parseInt(totalChunks) - 1;
+
+        // Upload to Cloudinary
+        const result = await uploadVideo(req.file.path, {
+            chunk_index: chunkIndex,
+            total_chunks: totalChunks,
+            original_filename: fileName
+        });
+
+        // Clean up the temporary file
+        fs.unlinkSync(req.file.path);
+
+        // Only return the final video URL on the last chunk
+        if (isLastChunk) {
+            res.json({
+                success: true,
+                videoUrl: result.secure_url
+            });
+        } else {
+            res.json({
+                success: true,
+                message: 'Chunk uploaded successfully'
+            });
+        }
+    } catch (error) {
+        console.error('Error uploading video:', error);
+
+        // Clean up temporary file if it exists
+        if (req.file && req.file.path) {
+            try {
+                fs.unlinkSync(req.file.path);
+            } catch (unlinkError) {
+                console.error('Error cleaning up temporary file:', unlinkError);
+            }
+        }
+
+        // Handle specific error types
+        if (error.name === 'MulterError') {
+            return res.status(400).json({
+                message: 'File upload error',
+                error: error.message
+            });
+        }
+
+        if (error.http_code === 413) {
+            return res.status(413).json({
+                message: 'File too large'
+            });
+        }
+
+        res.status(500).json({
+            message: 'Error uploading video',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
+    }
+});
 
 module.exports = router; 
