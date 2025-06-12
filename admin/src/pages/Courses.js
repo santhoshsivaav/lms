@@ -679,13 +679,14 @@ const Courses = () => {
                                             p: 2
                                         }}
                                     >
-                                        
                                         <IconButton
-                                            color="error"
+                                            onClick={() => handleOpenDialog(course)}
+                                            color="primary"
                                             size="small"
                                         >
-                                            <DeleteIcon />
+                                            <EditIcon />
                                         </IconButton>
+                                        
                                     </CardActions>
                                 </Card>
                             </Grid>
