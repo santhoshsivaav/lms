@@ -257,7 +257,7 @@ const Courses = () => {
 
                     const API_URL = process.env.REACT_APP_API_URL || 'https://lms-yunus-app.onrender.com/api';
                     const response = await fetch(
-                        `${API_URL}/api/courses/upload-video`,
+                        `${API_URL}/courses/upload-video`,
                         {
                             method: 'POST',
                             body: formData,

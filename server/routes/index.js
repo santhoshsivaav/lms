@@ -37,6 +37,8 @@ const {
     getEnrolledCourses
 } = require('../controllers/progressController');
 const analyticsController = require('../controllers/analyticsController');
+const upload = require('../middleware/upload');
+const { uploadVideo } = require('../controllers/uploadController');
 
 // Auth routes
 router.post('/auth/register', authValidation.register, validate, register);
@@ -52,6 +54,7 @@ router.delete('/courses/:id', auth, adminAuth, deleteCourse);
 
 // Course video routes
 router.get('/courses/videos', auth, adminAuth, getAllVideos);
+router.post('/courses/upload-video', auth, adminAuth, upload.single('video'), uploadVideo);
 router.post('/courses/:id/videos', auth, adminAuth, videoValidation.create, validate, addVideo);
 router.put('/courses/:id/videos/:videoId', auth, adminAuth, videoValidation.update, validate, updateVideo);
 router.delete('/courses/:id/videos/:videoId', auth, adminAuth, deleteVideo);
