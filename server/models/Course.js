@@ -17,7 +17,18 @@ const lessonSchema = new mongoose.Schema({
   },
   content: {
     videoUrl: String,
-    pdfUrl: String
+    pdfUrl: {
+      type: String,
+      validate: {
+        validator: function (v) {
+          if (this.type === 'pdf') {
+            return v && v.startsWith('https://drive.google.com/');
+          }
+          return true;
+        },
+        message: 'PDF URL must be a valid Google Drive URL'
+      }
+    }
   },
   order: {
     type: Number,

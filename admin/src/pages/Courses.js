@@ -92,6 +92,7 @@ const Courses = () => {
     const [uploadProgress, setUploadProgress] = useState(0);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [courseToDelete, setCourseToDelete] = useState(null);
+    const [googleDriveUrl, setGoogleDriveUrl] = useState('');
 
     useEffect(() => {
         fetchCourses();
@@ -242,45 +243,74 @@ const Courses = () => {
             setUploadingVideo(true);
             setUploadProgress(0);
             try {
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('upload_preset', 'lms_app');
-                formData.append('cloud_name', 'dzwr8crjj');
-
-                const response = await fetch(
-                    `https://api.cloudinary.com/v1_1/dzwr8crjj/video/upload`,
-                    {
-                        method: 'POST',
-                        body: formData,
+                if (file.type === 'application/pdf') {
+                    // For PDFs, we'll use Google Drive URL
+                    if (!googleDriveUrl || !googleDriveUrl.startsWith('https://drive.google.com/')) {
+                        throw new Error('Please provide a valid Google Drive URL');
                     }
-                );
 
-                if (!response.ok) {
-                    throw new Error('Upload failed');
-                }
+                    // Convert the sharing URL to a direct download URL
+                    const fileId = googleDriveUrl.match(/\/d\/(.*?)\/view/)?.[1] ||
+                        googleDriveUrl.match(/id=(.*?)(&|$)/)?.[1];
 
-                const data = await response.json();
-                setUploadProgress(100);
+                    if (!fileId) {
+                        throw new Error('Invalid Google Drive URL format');
+                    }
 
-                if (moduleIndex !== undefined && lessonIndex !== undefined) {
-                    // Editing existing lesson
-                    const field = file.type.startsWith('video/') ? 'videoUrl' : 'pdfUrl';
-                    const type = file.type.startsWith('video/') ? 'video' : 'pdf';
-                    handleEditLesson(moduleIndex, lessonIndex, 'type', type);
-                    handleEditLesson(moduleIndex, lessonIndex, field, data.secure_url);
+                    const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                    setUploadProgress(100);
+
+                    if (moduleIndex !== undefined && lessonIndex !== undefined) {
+                        handleEditLesson(moduleIndex, lessonIndex, 'type', 'pdf');
+                        handleEditLesson(moduleIndex, lessonIndex, 'pdfUrl', directUrl);
+                    } else {
+                        setCurrentLesson(prev => ({
+                            ...prev,
+                            type: 'pdf',
+                            content: {
+                                ...prev.content,
+                                pdfUrl: directUrl,
+                                videoUrl: ''
+                            }
+                        }));
+                    }
+                    setGoogleDriveUrl(''); // Reset the URL after successful upload
                 } else {
-                    // Adding new lesson
-                    const field = file.type.startsWith('video/') ? 'videoUrl' : 'pdfUrl';
-                    const type = file.type.startsWith('video/') ? 'video' : 'pdf';
-                    setCurrentLesson(prev => ({
-                        ...prev,
-                        type: type,
-                        content: {
-                            ...prev.content,
-                            [field]: data.secure_url,
-                            [field === 'videoUrl' ? 'pdfUrl' : 'videoUrl']: ''
+                    // Handle video upload as before
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('upload_preset', 'lms_app');
+                    formData.append('cloud_name', 'dzwr8crjj');
+
+                    const response = await fetch(
+                        `https://api.cloudinary.com/v1_1/dzwr8crjj/video/upload`,
+                        {
+                            method: 'POST',
+                            body: formData,
                         }
-                    }));
+                    );
+
+                    if (!response.ok) {
+                        throw new Error('Upload failed');
+                    }
+
+                    const data = await response.json();
+                    setUploadProgress(100);
+
+                    if (moduleIndex !== undefined && lessonIndex !== undefined) {
+                        handleEditLesson(moduleIndex, lessonIndex, 'type', 'video');
+                        handleEditLesson(moduleIndex, lessonIndex, 'videoUrl', data.secure_url);
+                    } else {
+                        setCurrentLesson(prev => ({
+                            ...prev,
+                            type: 'video',
+                            content: {
+                                ...prev.content,
+                                videoUrl: data.secure_url,
+                                pdfUrl: ''
+                            }
+                        }));
+                    }
                 }
             } catch (err) {
                 console.error('Upload error:', err);
@@ -443,6 +473,44 @@ const Courses = () => {
                 return module;
             })
         }));
+    };
+
+    const handleGoogleDriveUrlSubmit = (moduleIndex, lessonIndex) => {
+        try {
+            if (!googleDriveUrl || !googleDriveUrl.startsWith('https://drive.google.com/')) {
+                throw new Error('Please provide a valid Google Drive URL');
+            }
+
+            // Convert the sharing URL to a direct download URL
+            const fileId = googleDriveUrl.match(/\/d\/(.*?)\/view/)?.[1] ||
+                googleDriveUrl.match(/id=(.*?)(&|$)/)?.[1];
+
+            if (!fileId) {
+                throw new Error('Invalid Google Drive URL format');
+            }
+
+            const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+            if (moduleIndex !== undefined && lessonIndex !== undefined) {
+                handleEditLesson(moduleIndex, lessonIndex, 'type', 'pdf');
+                handleEditLesson(moduleIndex, lessonIndex, 'pdfUrl', directUrl);
+            } else {
+                setCurrentLesson(prev => ({
+                    ...prev,
+                    type: 'pdf',
+                    content: {
+                        ...prev.content,
+                        pdfUrl: directUrl,
+                        videoUrl: ''
+                    }
+                }));
+            }
+            setGoogleDriveUrl(''); // Reset the URL after successful upload
+            setError(null);
+        } catch (err) {
+            console.error('Error processing Google Drive URL:', err);
+            setError(err.message || 'Failed to process Google Drive URL');
+        }
     };
 
     const validateCourse = () => {
@@ -919,37 +987,76 @@ const Courses = () => {
                                                             </Box>
 
                                                             <Box>
-                                                                <input
-                                                                    accept={lesson.type === 'video' ? 'video/*' : 'application/pdf'}
-                                                                    type="file"
-                                                                    id={`file-upload-${moduleIndex}-${lessonIndex}`}
-                                                                    onChange={(e) => handleFileUpload(e, moduleIndex, lessonIndex)}
-                                                                    style={{ display: 'none' }}
-                                                                />
-                                                                <label htmlFor={`file-upload-${moduleIndex}-${lessonIndex}`}>
-                                                                    <Button
-                                                                        variant="outlined"
-                                                                        component="span"
-                                                                        startIcon={<CloudUploadIcon />}
-                                                                        disabled={uploadingVideo}
+                                                                <FormControl fullWidth sx={{ mb: 2 }}>
+                                                                    <InputLabel>Lesson Type</InputLabel>
+                                                                    <Select
+                                                                        value={lesson.type}
+                                                                        label="Lesson Type"
+                                                                        onChange={(e) => handleEditLesson(moduleIndex, lessonIndex, 'type', e.target.value)}
                                                                     >
-                                                                        {uploadingVideo ? 'Uploading...' : `Replace ${lesson.type === 'video' ? 'Video' : 'PDF'}`}
-                                                                    </Button>
-                                                                </label>
-                                                                {uploadingVideo && (
-                                                                    <Box sx={{ width: '100%', mt: 1 }}>
-                                                                        <LinearProgress variant="determinate" value={uploadProgress} />
-                                                                        <Typography variant="body2" color="text.secondary" align="center">
-                                                                            {uploadProgress}%
-                                                                        </Typography>
-                                                                    </Box>
-                                                                )}
-                                                                {(lesson.content?.videoUrl || lesson.content?.pdfUrl) && !uploadingVideo && (
-                                                                    <Alert severity="success">
-                                                                        {lesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
-                                                                    </Alert>
-                                                                )}
+                                                                        <MenuItem value="video">
+                                                                            <Stack direction="row" spacing={1} alignItems="center">
+                                                                                <VideoLibraryIcon />
+                                                                                <Typography>Video Lesson</Typography>
+                                                                            </Stack>
+                                                                        </MenuItem>
+                                                                        <MenuItem value="pdf">
+                                                                            <Stack direction="row" spacing={1} alignItems="center">
+                                                                                <PictureAsPdfIcon />
+                                                                                <Typography>PDF Document</Typography>
+                                                                            </Stack>
+                                                                        </MenuItem>
+                                                                    </Select>
+                                                                </FormControl>
                                                             </Box>
+
+                                                            {lesson.type === 'pdf' ? (
+                                                                <Box sx={{ mb: 2 }}>
+                                                                    <TextField
+                                                                        fullWidth
+                                                                        label="Google Drive URL"
+                                                                        value={googleDriveUrl}
+                                                                        onChange={(e) => setGoogleDriveUrl(e.target.value)}
+                                                                        placeholder="https://drive.google.com/file/d/..."
+                                                                        helperText="Paste the Google Drive sharing URL for your PDF"
+                                                                        sx={{ mb: 1 }}
+                                                                    />
+                                                                    <Button
+                                                                        variant="contained"
+                                                                        onClick={() => handleGoogleDriveUrlSubmit(moduleIndex, lessonIndex)}
+                                                                        disabled={!googleDriveUrl}
+                                                                        fullWidth
+                                                                    >
+                                                                        Update PDF URL
+                                                                    </Button>
+                                                                </Box>
+                                                            ) : (
+                                                                <Box>
+                                                                    <input
+                                                                        accept="video/*"
+                                                                        type="file"
+                                                                        id={`file-upload-${moduleIndex}-${lessonIndex}`}
+                                                                        onChange={(e) => handleFileUpload(e, moduleIndex, lessonIndex)}
+                                                                        style={{ display: 'none' }}
+                                                                    />
+                                                                    <label htmlFor={`file-upload-${moduleIndex}-${lessonIndex}`}>
+                                                                        <Button
+                                                                            variant="outlined"
+                                                                            component="span"
+                                                                            startIcon={<CloudUploadIcon />}
+                                                                            disabled={uploadingVideo}
+                                                                        >
+                                                                            Replace Video
+                                                                        </Button>
+                                                                    </label>
+                                                                </Box>
+                                                            )}
+
+                                                            {(lesson.content?.videoUrl || lesson.content?.pdfUrl) && !uploadingVideo && (
+                                                                <Alert severity="success" sx={{ mt: 1 }}>
+                                                                    {lesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
+                                                                </Alert>
+                                                            )}
                                                         </Stack>
                                                     </CardContent>
                                                 </Card>
@@ -982,19 +1089,21 @@ const Courses = () => {
                                                                     description: e.target.value
                                                                 }))}
                                                             />
-                                                            <FormControl fullWidth>
+                                                            <FormControl fullWidth sx={{ mb: 2 }}>
                                                                 <InputLabel>Lesson Type</InputLabel>
                                                                 <Select
                                                                     value={currentLesson.type}
                                                                     label="Lesson Type"
-                                                                    onChange={(e) => setCurrentLesson(prev => ({
-                                                                        ...prev,
-                                                                        type: e.target.value,
-                                                                        content: {
-                                                                            videoUrl: '',
-                                                                            pdfUrl: ''
-                                                                        }
-                                                                    }))}
+                                                                    onChange={(e) => {
+                                                                        setCurrentLesson(prev => ({
+                                                                            ...prev,
+                                                                            type: e.target.value,
+                                                                            content: {
+                                                                                videoUrl: '',
+                                                                                pdfUrl: ''
+                                                                            }
+                                                                        }));
+                                                                    }}
                                                                 >
                                                                     <MenuItem value="video">
                                                                         <Stack direction="row" spacing={1} alignItems="center">
@@ -1011,40 +1120,64 @@ const Courses = () => {
                                                                 </Select>
                                                             </FormControl>
 
-                                                            <Box>
-                                                                <input
-                                                                    accept={currentLesson.type === 'video' ? 'video/*' : 'application/pdf'}
-                                                                    type="file"
-                                                                    id="new-lesson-file-upload"
-                                                                    onChange={(e) => handleFileUpload(e)}
-                                                                    style={{ display: 'none' }}
-                                                                />
-                                                                <label htmlFor="new-lesson-file-upload">
+                                                            {currentLesson.type === 'pdf' ? (
+                                                                <Box sx={{ mb: 2 }}>
+                                                                    <TextField
+                                                                        fullWidth
+                                                                        label="Google Drive URL"
+                                                                        value={googleDriveUrl}
+                                                                        onChange={(e) => setGoogleDriveUrl(e.target.value)}
+                                                                        placeholder="https://drive.google.com/file/d/..."
+                                                                        helperText="Paste the Google Drive sharing URL for your PDF"
+                                                                        sx={{ mb: 1 }}
+                                                                    />
                                                                     <Button
                                                                         variant="contained"
-                                                                        component="span"
-                                                                        startIcon={<CloudUploadIcon />}
-                                                                        disabled={uploadingVideo}
+                                                                        onClick={() => handleGoogleDriveUrlSubmit()}
+                                                                        disabled={!googleDriveUrl}
                                                                         fullWidth
-                                                                        sx={{ mb: 1 }}
                                                                     >
-                                                                        {uploadingVideo ? 'Uploading...' : `Upload ${currentLesson.type === 'video' ? 'Video' : 'PDF'}`}
+                                                                        Add PDF URL
                                                                     </Button>
-                                                                </label>
-                                                                {uploadingVideo && (
-                                                                    <Box sx={{ width: '100%', mt: 1 }}>
-                                                                        <LinearProgress variant="determinate" value={uploadProgress} />
-                                                                        <Typography variant="body2" color="text.secondary" align="center">
-                                                                            {uploadProgress}%
-                                                                        </Typography>
-                                                                    </Box>
-                                                                )}
-                                                                {(currentLesson.content?.videoUrl || currentLesson.content?.pdfUrl) && !uploadingVideo && (
-                                                                    <Alert severity="success" sx={{ mt: 1 }}>
-                                                                        {currentLesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
-                                                                    </Alert>
-                                                                )}
-                                                            </Box>
+                                                                </Box>
+                                                            ) : (
+                                                                <Box>
+                                                                    <input
+                                                                        accept="video/*"
+                                                                        type="file"
+                                                                        id="new-lesson-file-upload"
+                                                                        onChange={(e) => handleFileUpload(e)}
+                                                                        style={{ display: 'none' }}
+                                                                    />
+                                                                    <label htmlFor="new-lesson-file-upload">
+                                                                        <Button
+                                                                            variant="contained"
+                                                                            component="span"
+                                                                            startIcon={<CloudUploadIcon />}
+                                                                            disabled={uploadingVideo}
+                                                                            fullWidth
+                                                                            sx={{ mb: 1 }}
+                                                                        >
+                                                                            Upload Video
+                                                                        </Button>
+                                                                    </label>
+                                                                </Box>
+                                                            )}
+
+                                                            {uploadingVideo && (
+                                                                <Box sx={{ width: '100%', mt: 1 }}>
+                                                                    <LinearProgress variant="determinate" value={uploadProgress} />
+                                                                    <Typography variant="body2" color="text.secondary" align="center">
+                                                                        {uploadProgress}%
+                                                                    </Typography>
+                                                                </Box>
+                                                            )}
+
+                                                            {(currentLesson.content?.videoUrl || currentLesson.content?.pdfUrl) && !uploadingVideo && (
+                                                                <Alert severity="success" sx={{ mt: 1 }}>
+                                                                    {currentLesson.type === 'video' ? 'Video' : 'PDF'} uploaded successfully
+                                                                </Alert>
+                                                            )}
                                                         </Stack>
                                                     </CardContent>
                                                     <CardActions>

@@ -6,12 +6,13 @@ import {
     ActivityIndicator,
     SafeAreaView,
     TouchableOpacity,
+    Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { courseService } from '../../api/courseService';
 import { AuthContext } from '../../context/AuthContext';
 import { COLORS } from '../../constants/Colors';
-import PDFViewer from '../../components/PDFViewer';
+import { WebView } from 'react-native-webview';
 import VideoPlayer from '../../components/VideoPlayer';
 
 const LessonDetailScreen = ({ route, navigation }) => {
@@ -20,6 +21,8 @@ const LessonDetailScreen = ({ route, navigation }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const { user } = useContext(AuthContext);
+    const screenWidth = Dimensions.get('window').width;
+    const screenHeight = Dimensions.get('window').height;
 
     useEffect(() => {
         fetchLessonDetails();
@@ -39,17 +42,55 @@ const LessonDetailScreen = ({ route, navigation }) => {
         }
     };
 
+    const getGoogleDriveViewerUrl = (url) => {
+        // Extract file ID from the URL
+        const fileId = url.match(/\/d\/(.*?)\/view/)?.[1] ||
+            url.match(/id=(.*?)(&|$)/)?.[1];
+
+        if (!fileId) {
+            throw new Error('Invalid Google Drive URL format');
+        }
+
+        // Return the Google Drive viewer URL with embedded mode
+        return `https://drive.google.com/file/d/${fileId}/preview`;
+    };
+
     const renderContent = () => {
         if (!lesson) return null;
 
         // Check if the lesson has a PDF file
-        if (lesson.pdfUrl) {
-            return <PDFViewer uri={lesson.pdfUrl} />;
+        if (lesson.type === 'pdf' && lesson.content?.pdfUrl) {
+            try {
+                const viewerUrl = getGoogleDriveViewerUrl(lesson.content.pdfUrl);
+                return (
+                    <View style={styles.pdfContainer}>
+                        <WebView
+                            source={{ uri: viewerUrl }}
+                            style={styles.pdfViewer}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            startInLoadingState={true}
+                            scalesPageToFit={true}
+                            onShouldStartLoadWithRequest={(request) => {
+                                // Only allow loading the PDF viewer URL
+                                return request.url.startsWith('https://drive.google.com/file/d/');
+                            }}
+                        />
+                    </View>
+                );
+            } catch (err) {
+                console.error('Error loading PDF:', err);
+                return (
+                    <View style={styles.errorContainer}>
+                        <Text style={styles.errorText}>Failed to load PDF document</Text>
+                    </View>
+                );
+            }
         }
-        
+
         // Check if the lesson has a video
-        if (lesson.videoUrl) {
-            return <VideoPlayer uri={lesson.videoUrl} />;
+        if (lesson.type === 'video' && lesson.content?.videoUrl) {
+            return <VideoPlayer uri={lesson.content.videoUrl} />;
         }
 
         return (
@@ -67,13 +108,10 @@ const LessonDetailScreen = ({ route, navigation }) => {
         );
     }
 
-    if (error) {
+    if (error || !lesson) {
         return (
             <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-                <TouchableOpacity style={styles.retryButton} onPress={fetchLessonDetails}>
-                    <Text style={styles.retryButtonText}>Retry</Text>
-                </TouchableOpacity>
+                <Text style={styles.errorText}>{error || 'Lesson not found'}</Text>
             </View>
         );
     }
@@ -82,14 +120,12 @@ const LessonDetailScreen = ({ route, navigation }) => {
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity
-                    style={styles.backButton}
                     onPress={() => navigation.goBack()}
+                    style={styles.backButton}
                 >
-                    <Ionicons name="arrow-back" size={24} color="#000" />
+                    <Ionicons name="arrow-back" size={24} color={COLORS.text} />
                 </TouchableOpacity>
-                <Text style={styles.title} numberOfLines={2}>
-                    {lesson?.title || 'Lesson'}
-                </Text>
+                <Text style={styles.title}>{lesson.title}</Text>
             </View>
             {renderContent()}
         </SafeAreaView>
@@ -99,22 +135,32 @@ const LessonDetailScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: COLORS.background,
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         padding: 16,
         borderBottomWidth: 1,
-        borderBottomColor: '#eee',
+        borderBottomColor: COLORS.border,
     },
     backButton: {
         marginRight: 16,
     },
     title: {
         fontSize: 18,
-        fontWeight: '600',
+        fontWeight: 'bold',
+        color: COLORS.text,
         flex: 1,
+    },
+    pdfContainer: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    pdfViewer: {
+        flex: 1,
+        width: '100%',
+        height: '100%',
     },
     loadingContainer: {
         flex: 1,
@@ -128,21 +174,9 @@ const styles = StyleSheet.create({
         padding: 20,
     },
     errorText: {
-        fontSize: 16,
-        color: '#e74c3c',
-        marginBottom: 16,
+        color: COLORS.error,
         textAlign: 'center',
-    },
-    retryButton: {
-        backgroundColor: COLORS.primary,
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-    },
-    retryButtonText: {
-        color: '#fff',
         fontSize: 16,
-        fontWeight: '600',
     },
     noContentContainer: {
         flex: 1,
@@ -151,9 +185,9 @@ const styles = StyleSheet.create({
         padding: 20,
     },
     noContentText: {
-        fontSize: 16,
-        color: '#7f8c8d',
+        color: COLORS.text,
         textAlign: 'center',
+        fontSize: 16,
     },
 });
 
