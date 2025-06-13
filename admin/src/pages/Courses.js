@@ -10,6 +10,7 @@ import {
     DialogTitle,
     DialogContent,
     DialogActions,
+    DialogContentText,
     TextField,
     Chip,
     IconButton,
@@ -89,6 +90,8 @@ const Courses = () => {
     const [videoFile, setVideoFile] = useState(null);
     const [uploadingVideo, setUploadingVideo] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [courseToDelete, setCourseToDelete] = useState(null);
 
     useEffect(() => {
         fetchCourses();
@@ -239,59 +242,32 @@ const Courses = () => {
             setUploadingVideo(true);
             setUploadProgress(0);
             try {
-                const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
-                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-                let uploadedChunks = 0;
-                let videoUrl = '';
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('upload_preset', 'lms_app');
+                formData.append('cloud_name', 'dzwr8crjj');
 
-                for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-                    const start = chunkIndex * CHUNK_SIZE;
-                    const end = Math.min(start + CHUNK_SIZE, file.size);
-                    const chunk = file.slice(start, end);
-
-                    const formData = new FormData();
-                    formData.append('video', chunk);
-                    formData.append('chunkIndex', chunkIndex);
-                    formData.append('totalChunks', totalChunks);
-                    formData.append('fileName', file.name);
-
-                    const API_URL = process.env.REACT_APP_API_URL || 'https://lms-yunus-app.onrender.com/api';
-                    const response = await fetch(
-                        `${API_URL}/courses/upload-video`,
-                        {
-                            method: 'POST',
-                            body: formData,
-                            credentials: 'include',
-                            headers: {
-                                'Authorization': `Bearer ${localStorage.getItem('token')}`
-                            }
-                        }
-                    );
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || 'Upload failed');
+                const response = await fetch(
+                    `https://api.cloudinary.com/v1_1/dzwr8crjj/video/upload`,
+                    {
+                        method: 'POST',
+                        body: formData,
                     }
+                );
 
-                    const data = await response.json();
-                    uploadedChunks++;
-
-                    // Update progress
-                    const progress = Math.round((uploadedChunks / totalChunks) * 100);
-                    setUploadProgress(progress);
-
-                    // If this is the last chunk, get the final video URL
-                    if (chunkIndex === totalChunks - 1) {
-                        videoUrl = data.videoUrl;
-                    }
+                if (!response.ok) {
+                    throw new Error('Upload failed');
                 }
+
+                const data = await response.json();
+                setUploadProgress(100);
 
                 if (moduleIndex !== undefined && lessonIndex !== undefined) {
                     // Editing existing lesson
                     const field = file.type.startsWith('video/') ? 'videoUrl' : 'pdfUrl';
                     const type = file.type.startsWith('video/') ? 'video' : 'pdf';
                     handleEditLesson(moduleIndex, lessonIndex, 'type', type);
-                    handleEditLesson(moduleIndex, lessonIndex, field, videoUrl);
+                    handleEditLesson(moduleIndex, lessonIndex, field, data.secure_url);
                 } else {
                     // Adding new lesson
                     const field = file.type.startsWith('video/') ? 'videoUrl' : 'pdfUrl';
@@ -301,7 +277,7 @@ const Courses = () => {
                         type: type,
                         content: {
                             ...prev.content,
-                            [field]: videoUrl,
+                            [field]: data.secure_url,
                             [field === 'videoUrl' ? 'pdfUrl' : 'videoUrl']: ''
                         }
                     }));
@@ -591,6 +567,38 @@ const Courses = () => {
         setShowSuccess(false);
     };
 
+    const handleDeleteConfirm = () => {
+        if (courseToDelete) {
+            handleDeleteCourse(courseToDelete);
+        }
+        setDeleteDialogOpen(false);
+        setCourseToDelete(null);
+    };
+
+    const handleDeleteCourse = async (course) => {
+        try {
+            const response = await fetch(`https://lms-yunus-app.onrender.com/api/courses/${course._id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+
+            if (response.ok) {
+                setSuccessMessage('Course deleted successfully');
+                setShowSuccess(true);
+                // Remove course from local state
+                setCourses(courses.filter(c => c._id !== course._id));
+            } else {
+                const errorData = await response.json();
+                setError(errorData.message || 'Failed to delete course');
+            }
+        } catch (err) {
+            console.error('Error deleting course:', err);
+            setError('An error occurred while deleting the course');
+        }
+    };
+
     if (loading) {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
@@ -719,7 +727,16 @@ const Courses = () => {
                                         >
                                             <EditIcon />
                                         </IconButton>
-
+                                        <IconButton
+                                            onClick={() => {
+                                                setCourseToDelete(course);
+                                                setDeleteDialogOpen(true);
+                                            }}
+                                            color="error"
+                                            size="small"
+                                        >
+                                            <DeleteIcon />
+                                        </IconButton>
                                     </CardActions>
                                 </Card>
                             </Grid>
@@ -1096,6 +1113,24 @@ const Courses = () => {
                         disabled={!formData.title || !formData.description || !formData.thumbnail || formData.modules.length === 0}
                     >
                         {editingCourse ? 'Update' : 'Create'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog
+                open={deleteDialogOpen}
+                onClose={() => setDeleteDialogOpen(false)}
+            >
+                <DialogTitle>Delete Course</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Are you sure you want to delete this course? This action cannot be undone.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+                        Delete
                     </Button>
                 </DialogActions>
             </Dialog>

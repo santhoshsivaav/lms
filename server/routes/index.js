@@ -29,6 +29,7 @@ const {
     uploadFile,
     uploadMultipleFiles,
     deleteUploadedFile,
+    uploadVideo,
 } = require('../controllers/uploadController');
 const {
     getCourseProgress,
@@ -38,7 +39,6 @@ const {
 } = require('../controllers/progressController');
 const analyticsController = require('../controllers/analyticsController');
 const upload = require('../middleware/upload');
-const { uploadVideo } = require('../controllers/uploadController');
 
 // Auth routes
 router.post('/auth/register', authValidation.register, validate, register);

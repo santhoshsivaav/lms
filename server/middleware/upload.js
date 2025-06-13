@@ -1,37 +1,26 @@
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('cloudinary').v2;
 
-// Create uploads directory if it doesn't exist
-const uploadDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-// Configure storage
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        let folder = 'images';
-
-        if (file.fieldname === 'video') {
-            folder = 'videos';
-        }
-
-        const destPath = path.join(uploadDir, folder);
-
-        // Create folder if it doesn't exist
-        if (!fs.existsSync(destPath)) {
-            fs.mkdirSync(destPath, { recursive: true });
-        }
-
-        cb(null, destPath);
+// Configure Cloudinary storage
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'lms-app',
+        resource_type: 'auto',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'mp4', 'mov', 'webm'],
+        transformation: [
+            { width: 1000, height: 1000, crop: 'limit' }, // For images
+            { quality: 'auto' }, // Auto quality
+        ],
     },
-    filename: function (req, file, cb) {
-        // Create unique filename with original extension
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname);
-        cb(null, file.fieldname + '-' + uniqueSuffix + ext);
-    }
 });
 
 // File filter

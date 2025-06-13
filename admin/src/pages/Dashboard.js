@@ -25,6 +25,7 @@ import {
     MenuItem,
     FormControl,
     InputLabel,
+    DialogContentText,
 } from '@mui/material';
 import Courses from './Courses';
 import AddIcon from '@mui/icons-material/Add';
@@ -38,6 +39,8 @@ const Dashboard = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [openDialog, setOpenDialog] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [userToDelete, setUserToDelete] = useState(null);
     const [editingUser, setEditingUser] = useState(null);
     const [formData, setFormData] = useState({
         name: '',
@@ -170,6 +173,15 @@ const Dashboard = () => {
 
     const handleSubmit = async () => {
         try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setError('Authentication token not found. Please login again.');
+                return;
+            }
+
+            console.log('Using token for user update:', token.substring(0, 10) + '...');
+
+            // Use correct API endpoint
             const url = editingUser
                 ? `https://lms-yunus-app.onrender.com/api/users/${editingUser._id}`
                 : 'https://lms-yunus-app.onrender.com/api/auth/register';
@@ -178,31 +190,79 @@ const Dashboard = () => {
             const userData = {
                 name: formData.name,
                 email: formData.email,
-                password: formData.password,
                 role: formData.role,
                 preferredCategories: formData.preferredCategories.map(catId => catId.toString())
             };
 
-            console.log('Sending user data:', userData); // Debug log
+            // Only include password if it's not empty
+            if (formData.password) {
+                userData.password = formData.password;
+            }
+
+            console.log('Sending user data:', userData);
 
             const response = await fetch(url, {
                 method: editingUser ? 'PUT' : 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify(userData),
+                body: JSON.stringify(userData)
             });
 
             if (response.ok) {
                 fetchUsers();
                 handleCloseDialog();
             } else {
-                const errorData = await response.json();
-                setError(errorData.message || 'Failed to save user');
+                const errorData = await response.json().catch(() => ({ message: `Failed with status: ${response.status}` }));
+                console.error('Update user error response:', response.status, errorData);
+                setError(errorData.message || `Failed to save user: ${response.status}`);
             }
         } catch (err) {
-            setError('An error occurred while saving the user');
+            console.error('Error saving user:', err);
+            setError(`An error occurred while saving the user: ${err.message}`);
+        }
+    };
+
+    const handleDeleteConfirm = () => {
+        if (userToDelete) {
+            handleDeleteUser(userToDelete);
+        }
+        setDeleteDialogOpen(false);
+        setUserToDelete(null);
+    };
+
+    const handleDeleteUser = async (user) => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                setError('Authentication token not found. Please login again.');
+                return;
+            }
+
+            console.log('Deleting user with ID:', user._id);
+            console.log('Using token:', token.substring(0, 10) + '...');
+
+            // Use correct API endpoint
+            const response = await fetch(`https://lms-yunus-app.onrender.com/api/users/${user._id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                // Remove user from local state
+                setUsers(users.filter(u => u._id !== user._id));
+            } else {
+                const errorData = await response.json().catch(() => ({ message: `Failed with status: ${response.status}` }));
+                console.error('Delete user error response:', response.status, errorData);
+                setError(errorData.message || `Failed to delete user: ${response.status}`);
+            }
+        } catch (err) {
+            console.error('Error deleting user:', err);
+            setError(`An error occurred while deleting the user: ${err.message}`);
         }
     };
 
@@ -250,7 +310,6 @@ const Dashboard = () => {
                                     <TableCell>Email</TableCell>
                                     <TableCell>Role</TableCell>
                                     <TableCell>Preferred Categories</TableCell>
-                                    
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -267,7 +326,6 @@ const Dashboard = () => {
                                                     .join(', ')
                                                 : 'None'}
                                         </TableCell>
-                                        
                                     </TableRow>
                                 ))}
                             </TableBody>
@@ -372,6 +430,24 @@ const Dashboard = () => {
                     {error}
                 </Typography>
             )}
+
+            <Dialog
+                open={deleteDialogOpen}
+                onClose={() => setDeleteDialogOpen(false)}
+            >
+                <DialogTitle>Delete User</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Are you sure you want to delete this user? This action cannot be undone.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+                        Delete
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Container>
     );
 };

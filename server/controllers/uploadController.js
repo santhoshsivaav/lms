@@ -1,4 +1,4 @@
-const { upload, deleteFile } = require('../utils/cloudinary');
+const { deleteFile } = require('../utils/cloudinary');
 
 // Upload single file
 const uploadFile = async (req, res) => {
@@ -56,6 +56,53 @@ const uploadMultipleFiles = async (req, res) => {
     }
 };
 
+// Upload video file
+const uploadVideo = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No video file uploaded' });
+        }
+
+        const { chunkIndex, totalChunks, fileName } = req.body;
+        const isLastChunk = parseInt(chunkIndex) === parseInt(totalChunks) - 1;
+
+        // The file is already uploaded to Cloudinary by multer-storage-cloudinary
+        // We just need to return the URL
+        if (isLastChunk) {
+            res.json({
+                success: true,
+                videoUrl: req.file.path
+            });
+        } else {
+            res.json({
+                success: true,
+                message: 'Chunk uploaded successfully'
+            });
+        }
+    } catch (error) {
+        console.error('Error uploading video:', error);
+
+        // Handle specific error types
+        if (error.name === 'MulterError') {
+            return res.status(400).json({
+                message: 'File upload error',
+                error: error.message
+            });
+        }
+
+        if (error.http_code === 413) {
+            return res.status(413).json({
+                message: 'File too large'
+            });
+        }
+
+        res.status(500).json({
+            message: 'Error uploading video',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
+    }
+};
+
 // Delete file
 const deleteUploadedFile = async (req, res) => {
     try {
@@ -87,4 +134,5 @@ module.exports = {
     uploadFile,
     uploadMultipleFiles,
     deleteUploadedFile,
+    uploadVideo
 }; 
