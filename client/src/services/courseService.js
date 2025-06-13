@@ -67,6 +67,36 @@ export const courseService = {
         }
     },
 
+    // Get all progress for a user
+    getProgress: async (courseId) => {
+        try {
+            const response = await api.get(`/courses/${courseId}/progress`);
+            console.log('Progress response:', response.data);
+
+            if (!response.data.success) {
+                throw new Error(response.data.message || 'Failed to fetch progress');
+            }
+            return response.data.data;
+        } catch (error) {
+            console.error('Error in getProgress:', error);
+            throw error;
+        }
+    },
+
+    // Get video progress
+    getVideoProgress: async (courseId, videoId) => {
+        try {
+            const response = await api.get(`/courses/${courseId}/lesson/${videoId}/progress`);
+            if (!response.data.success) {
+                throw new Error(response.data.message || 'Failed to fetch video progress');
+            }
+            return response.data.data;
+        } catch (error) {
+            console.error('Error in getVideoProgress:', error);
+            throw error;
+        }
+    },
+
     // Update video progress
     updateVideoProgress: async (courseId, videoId, progress) => {
         try {
@@ -84,14 +114,31 @@ export const courseService = {
     // Mark video as completed
     markVideoCompleted: async (courseId, videoId) => {
         try {
-            const response = await api.post(`/courses/${courseId}/lesson/${videoId}/complete`);
+            console.log(`Marking video as completed - courseId: ${courseId}, lessonId: ${videoId}`);
+
+            // Send proper payload with lessonId to fix the validation error
+            const payload = {
+                lessonId: videoId
+            };
+
+            const response = await api.post(`/courses/${courseId}/lesson/${videoId}/complete`, payload);
+            console.log('Mark completed response:', response.data);
+
             if (!response.data.success) {
+                console.error('API returned error:', response.data);
                 throw new Error(response.data.message || 'Failed to mark video as completed');
             }
-            return response.data.data;
+            return {
+                success: true,
+                data: response.data.data
+            };
         } catch (error) {
             console.error('Error in markVideoCompleted:', error);
-            throw error;
+            // Return more detailed error information
+            return {
+                success: false,
+                error: error.message || 'Unknown error marking video as completed'
+            };
         }
     },
 

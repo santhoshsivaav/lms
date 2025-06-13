@@ -51,6 +51,16 @@ const VideoPlayerScreen = ({ navigation, route }) => {
     const isOrientationChanging = useRef(false);
     const [networkType, setNetworkType] = useState(null);
     const [isNetworkAvailable, setIsNetworkAvailable] = useState(true);
+    const prevPosition = useRef(0);
+    const prevIsPlaying = useRef(false);
+    const lastSavedPosition = useRef(0);
+    const videoPositions = useRef({});
+    const reloadAttempts = useRef(0);
+    const isPlayerResetting = useRef(false);
+    const videoLoadTimestamp = useRef(0);
+    const [tapPosition, setTapPosition] = useState({ x: 0, y: 0 });
+    const [showTapIndicator, setShowTapIndicator] = useState(false);
+    const tapIndicatorOpacity = useRef(new Animated.Value(0)).current;
 
     const { user } = useContext(AuthContext);
 
@@ -87,6 +97,34 @@ const VideoPlayerScreen = ({ navigation, route }) => {
             await ScreenCapture.allowScreenCaptureAsync();
 
             console.log(`Fetching video details for courseId: ${courseId}, videoId: ${videoId}`);
+
+            // Check if the video is already completed
+            try {
+                const progressResponse = await courseService.getProgress(courseId);
+                console.log('Progress response:', progressResponse);
+
+                if (progressResponse && progressResponse.lessons) {
+                    // Find this specific lesson in progress data
+                    const lessonProgress = progressResponse.lessons.find(
+                        lesson => lesson.lessonId === videoId
+                    );
+
+                    if (lessonProgress && lessonProgress.completed) {
+                        console.log('Video is already marked as completed');
+                        setIsCompleted(true);
+
+                        // For completed videos, reset any saved position
+                        if (videoPositions.current) {
+                            // This will be set properly once we get the videoUrl
+                            prevPosition.current = 0;
+                            lastSavedPosition.current = 0;
+                        }
+                    }
+                }
+            } catch (progressErr) {
+                console.warn('Error checking video completion status:', progressErr);
+                // Continue anyway, as this is not critical
+            }
 
             // First try with getVideoPlayerUrl which works in Expo Go
             let response;
@@ -172,6 +210,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
             }
 
             console.log('Initializing video player with URL:', videoUrl);
+            videoLoadTimestamp.current = Date.now();
 
             // CRITICAL: Completely disable screen capture protection during playback
             await ScreenCapture.allowScreenCaptureAsync();
@@ -187,13 +226,32 @@ const VideoPlayerScreen = ({ navigation, route }) => {
             // Unload any existing video
             await videoRef.current.unloadAsync();
 
+            // Check if we have a saved position
+            let startPosition = 0;
+
+            // For completed videos, always start from the beginning
+            if (isCompleted) {
+                console.log('Loading completed video - starting from beginning');
+                // Reset any saved position
+                if (videoUrl) {
+                    videoPositions.current[videoUrl] = 0;
+                }
+                lastSavedPosition.current = 0;
+                prevPosition.current = 0;
+            }
+            // For videos in progress, restore the position
+            else if (videoPositions.current[videoUrl] > 0) {
+                startPosition = videoPositions.current[videoUrl];
+                console.log(`Using saved position: ${startPosition}ms`);
+            }
+
             // Use basic configuration for maximum compatibility
             const loadConfig = {
-                shouldPlay: false,
+                shouldPlay: true, // Auto-play the video
                 isMuted: false,
                 volume: 1.0,
                 progressUpdateIntervalMillis: 1000,
-                positionMillis: 0,
+                positionMillis: startPosition, // Start from saved position if available
                 rate: 1.0,
                 shouldCorrectPitch: true,
                 useNativeControls: false,
@@ -205,20 +263,30 @@ const VideoPlayerScreen = ({ navigation, route }) => {
 
             // Add retry mechanism for loading
             let retryCount = 0;
-            const maxRetries = 3;
+            const maxRetries = 5; // Increased retries
 
             const attemptLoad = async () => {
                 try {
-                    // First, verify the video URL is accessible
+                    // Add more validation before proceeding
+                    if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.includes('://')) {
+                        throw new Error(`Invalid video URL format: ${videoUrl}`);
+                    }
+
+                    // First, verify the video URL is accessible - but handle network errors gracefully
+                    let isUrlAccessible = false;
                     try {
-                        const response = await fetch(videoUrl, { method: 'HEAD' });
-                        if (!response.ok) {
-                            throw new Error('Video URL not accessible');
+                        const response = await fetch(videoUrl, { method: 'HEAD', timeout: 5000 });
+                        isUrlAccessible = response.ok;
+                        if (!isUrlAccessible) {
+                            console.warn(`Video URL response not OK: ${response.status}`);
                         }
                     } catch (urlError) {
-                        console.error('Error checking video URL:', urlError);
-                        throw new Error('Video URL not accessible');
+                        console.warn('Error checking video URL accessibility (continuing anyway):', urlError);
+                        // Continue anyway as some servers might block HEAD requests
                     }
+
+                    // Try to load the video even if HEAD request failed - it might still work
+                    console.log(`Loading video attempt ${retryCount + 1}/${maxRetries}...`);
 
                     const loadResult = await videoRef.current.loadAsync(
                         { uri: videoUrl },
@@ -228,34 +296,24 @@ const VideoPlayerScreen = ({ navigation, route }) => {
 
                     console.log('Video load result:', loadResult);
 
-                    if (loadResult && loadResult.status) {
-                        // Set up status update handling with more detailed logging
-                        videoRef.current.setOnPlaybackStatusUpdate((status) => {
-                            console.log('Playback status update:', status);
-                            if (status.error) {
-                                console.error('Playback error in status update:', status.error);
-                                handleError(new Error(status.error));
-                                return;
-                            }
-                            handlePlaybackStatusUpdate(status);
-                        });
+                    if (loadResult && loadResult.isLoaded) {
+                        console.log('Video loaded successfully');
 
-                        // Give more time for initialization
-                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        // Set up status update handling
+                        videoRef.current.setOnPlaybackStatusUpdate(handlePlaybackStatusUpdate);
+
+                        // Give some time for initialization
+                        await new Promise(resolve => setTimeout(resolve, 500));
 
                         if (videoRef.current) {
                             // Start playback with error handling
                             try {
                                 const playResult = await videoRef.current.playAsync();
                                 console.log('Play result:', playResult);
-
-                                // Verify playback started successfully
-                                if (!playResult.isLoaded) {
-                                    throw new Error('Playback did not start properly');
-                                }
+                                return true; // Success!
                             } catch (playError) {
-                                console.error('Error during initial playback:', playError);
-                                throw playError;
+                                console.error('Error starting playback:', playError);
+                                throw new Error('Failed to start playback');
                             }
                         }
                     } else {
@@ -264,12 +322,15 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                 } catch (loadError) {
                     console.error(`Load attempt ${retryCount + 1} failed:`, loadError);
 
-                    if (retryCount < maxRetries) {
+                    if (retryCount < maxRetries - 1) {
                         retryCount++;
                         console.log(`Retrying load (${retryCount}/${maxRetries})...`);
+
                         // Increase delay between retries
-                        await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
-                        await attemptLoad();
+                        const delay = 1000 + (retryCount * 500);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
+                        return attemptLoad(); // Retry recursively
                     } else {
                         throw new Error('Failed to load video after multiple attempts');
                     }
@@ -286,9 +347,90 @@ const VideoPlayerScreen = ({ navigation, route }) => {
 
     // Handle playback status updates
     const handlePlaybackStatusUpdate = (status) => {
+        if (!status.isLoaded) return;
+
         setStatus(status);
 
-        if (status.didJustFinish && !isCompleted) {
+        // Check for video completion
+        if (status.isLoaded && status.didJustFinish && !isCompleted) {
+            console.log('Video playback finished - marking as completed');
+            markVideoCompleted();
+            return;
+        }
+
+        // Only track position if actually playing and progressing
+        if (status.isLoaded && status.isPlaying && status.positionMillis > 0) {
+            // Save position every second for recovery
+            if (status.positionMillis > prevPosition.current + 1000 ||
+                status.positionMillis < prevPosition.current) {
+
+                // Store position keyed by video URL for this specific video
+                if (video?.videoUrl) {
+                    videoPositions.current[video.videoUrl] = status.positionMillis;
+                    lastSavedPosition.current = status.positionMillis;
+                }
+
+                prevPosition.current = status.positionMillis;
+                prevIsPlaying.current = status.isPlaying;
+            }
+        }
+
+        // Detect unexpected position resets during playback
+        if (status.isLoaded &&
+            status.positionMillis === 0 &&
+            lastSavedPosition.current > 1000 &&
+            !status.didJustFinish &&
+            Date.now() - videoLoadTimestamp.current > 5000) {  // Only after video has played for 5+ seconds
+
+            // Don't recover position for completed videos - they should start from beginning
+            if (isCompleted) {
+                console.log('Completed video reset to beginning - keeping at start');
+                lastSavedPosition.current = 0;
+                prevPosition.current = 0;
+                return;
+            }
+
+            console.log(`Detected unexpected reset. Last position: ${lastSavedPosition.current}ms`);
+
+            // Don't try to recover too many times
+            if (reloadAttempts.current < 3 && !isPlayerResetting.current) {
+                reloadAttempts.current += 1;
+                isPlayerResetting.current = true;
+
+                // Use the most recent saved position
+                const recoveryPosition = lastSavedPosition.current;
+
+                console.log(`Attempting to recover playback position (${recoveryPosition}ms), attempt ${reloadAttempts.current}/3`);
+
+                // Give a short delay before trying to restore position
+                setTimeout(() => {
+                    if (videoRef.current) {
+                        videoRef.current.setPositionAsync(recoveryPosition)
+                            .then(() => {
+                                if (prevIsPlaying.current) {
+                                    videoRef.current.playAsync();
+                                }
+                                isPlayerResetting.current = false;
+                            })
+                            .catch(error => {
+                                console.error('Error recovering position:', error);
+                                isPlayerResetting.current = false;
+                            });
+                    } else {
+                        isPlayerResetting.current = false;
+                    }
+                }, 300);
+            } else if (reloadAttempts.current >= 3) {
+                console.log('Max recovery attempts reached');
+            }
+        }
+
+        // Handle auto-saving of progress when reaching 90% of the video
+        if (status.isLoaded &&
+            status.durationMillis &&
+            status.positionMillis > 0 &&
+            status.positionMillis / status.durationMillis > 0.9 &&
+            !isCompleted) {
             markVideoCompleted();
         }
     };
@@ -319,20 +461,44 @@ const VideoPlayerScreen = ({ navigation, route }) => {
     // Initialize on mount
     useEffect(() => {
         fetchVideoDetails();
+
         return () => {
             if (progressInterval.current) {
                 clearInterval(progressInterval.current);
             }
+
+            if (controlsTimeout.current) {
+                clearTimeout(controlsTimeout.current);
+            }
+
             if (videoRef.current) {
                 videoRef.current.unloadAsync();
+            }
+
+            // Save any current position before unmounting
+            if (video?.videoUrl && status.isLoaded && status.positionMillis > 0) {
+                videoPositions.current[video.videoUrl] = status.positionMillis;
+                console.log(`Saved position on unmount: ${status.positionMillis}ms`);
             }
         };
     }, [courseId, videoId, user]);
 
-    // Save progress periodically
+    // Save video position periodically to avoid lost progress
+    useEffect(() => {
+        const savePositionInterval = setInterval(() => {
+            if (video?.videoUrl && status.isLoaded && status.positionMillis > 1000) {
+                videoPositions.current[video.videoUrl] = status.positionMillis;
+                lastSavedPosition.current = status.positionMillis;
+            }
+        }, 5000); // Save every 5 seconds
+
+        return () => clearInterval(savePositionInterval);
+    }, [video, status]);
+
+    // Save progress to server periodically
     useEffect(() => {
         if (video && status.isPlaying) {
-            progressInterval.current = setInterval(saveProgress, 10000);
+            progressInterval.current = setInterval(saveProgress, 30000); // Every 30 seconds
         }
         return () => {
             if (progressInterval.current) {
@@ -399,7 +565,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
     const handleForward = async () => {
         if (videoRef.current && status.isLoaded) {
             const newPosition = Math.min(
-                status.positionMillis + 10000,
+                status.positionMillis + 5000,
                 status.durationMillis
             );
             await videoRef.current.setPositionAsync(newPosition);
@@ -409,7 +575,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
     const handleBackward = async () => {
         if (videoRef.current && status.isLoaded) {
             const newPosition = Math.max(
-                status.positionMillis - 10000,
+                status.positionMillis - 5000,
                 0
             );
             await videoRef.current.setPositionAsync(newPosition);
@@ -584,14 +750,23 @@ const VideoPlayerScreen = ({ navigation, route }) => {
         }
         lastTouchTime.current = now;
 
+        // Always show controls when tapped
         setShowControls(true);
+
         if (controlsTimeout.current) {
             clearTimeout(controlsTimeout.current);
         }
+
+        // Set timeout to hide controls after a delay
         controlsTimeout.current = setTimeout(() => {
             setShowControls(false);
             isTouching.current = false;
         }, 3000);
+
+        // Allow next touch after a short delay
+        setTimeout(() => {
+            isTouching.current = false;
+        }, 100);
     };
 
     // Add touch handlers for the fullscreen video
@@ -609,10 +784,43 @@ const VideoPlayerScreen = ({ navigation, route }) => {
     const handleLoad = async () => {
         try {
             console.log('Video loaded callback fired');
+            videoLoadTimestamp.current = Date.now();
+            reloadAttempts.current = 0;
 
             if (videoRef.current) {
                 const status = await videoRef.current.getStatusAsync();
                 console.log('Video loaded with status:', status);
+
+                // If completed video, always start from beginning
+                if (isCompleted) {
+                    console.log('Loading completed video - starting from beginning');
+
+                    try {
+                        // Reset any saved position
+                        if (video?.videoUrl) {
+                            videoPositions.current[video.videoUrl] = 0;
+                        }
+                        lastSavedPosition.current = 0;
+                        prevPosition.current = 0;
+
+                        // Force position to beginning
+                        await videoRef.current.setPositionAsync(0);
+                    } catch (posErr) {
+                        console.error('Error resetting position:', posErr);
+                    }
+                }
+                // If not completed video and we have a saved position, restore it
+                else if (video?.videoUrl && videoPositions.current[video.videoUrl] > 1000) {
+                    const savedPosition = videoPositions.current[video.videoUrl];
+                    console.log(`Restoring saved position: ${savedPosition}ms`);
+
+                    try {
+                        await videoRef.current.setPositionAsync(savedPosition);
+                        lastSavedPosition.current = savedPosition;
+                    } catch (posErr) {
+                        console.error('Error setting position:', posErr);
+                    }
+                }
 
                 // Play the video after a short delay
                 setTimeout(async () => {
@@ -623,7 +831,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                     } catch (playError) {
                         console.error('Error starting playback:', playError);
                     }
-                }, 500);
+                }, 300);
             }
         } catch (error) {
             console.error('Error in handleLoad:', error);
@@ -633,10 +841,53 @@ const VideoPlayerScreen = ({ navigation, route }) => {
 
     const markVideoCompleted = async () => {
         try {
-            await courseService.markVideoCompleted(courseId, videoId);
+            if (isCompleted) {
+                return; // Already marked as completed
+            }
+
+            setIsSavingProgress(true);
+            console.log('Marking video as completed:', courseId, videoId);
+
+            // Set as completed locally even if the API fails
             setIsCompleted(true);
+
+            try {
+                const result = await courseService.markVideoCompleted(courseId, videoId);
+
+                if (result && result.success) {
+                    console.log('Video marked as completed successfully');
+
+                    // Reset the saved position for completed videos
+                    if (video?.videoUrl) {
+                        videoPositions.current[video.videoUrl] = 0;
+                    }
+
+                    // Show congratulation message or indication
+                    Alert.alert(
+                        "Lesson Completed",
+                        "Great job! You've completed this lesson.",
+                        [{ text: "OK" }]
+                    );
+                } else {
+                    console.error('Error in markVideoCompleted response:', result);
+                }
+            } catch (apiErr) {
+                console.error('API Error in markVideoCompleted:', apiErr);
+                // Despite the API error, we'll still mark it as completed in the UI
+                // This provides a better user experience even if the server sync fails
+            }
+
+            // Reset the saved position for completed videos
+            if (video?.videoUrl) {
+                videoPositions.current[video.videoUrl] = 0;
+            }
+            lastSavedPosition.current = 0;
+            prevPosition.current = 0;
+
         } catch (err) {
-            console.error('Error marking video as completed:', err);
+            console.error('Error in markVideoCompleted:', err);
+        } finally {
+            setIsSavingProgress(false);
         }
     };
 
@@ -684,6 +935,26 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                     console.error('Error unloading video:', unloadError);
                 });
         }
+    };
+
+    // Handle touch with position tracking for visual feedback
+    const handleScreenTap = (event) => {
+        const { locationX, locationY } = event.nativeEvent;
+        setTapPosition({ x: locationX, y: locationY });
+        setShowTapIndicator(true);
+
+        // Animate tap indicator
+        tapIndicatorOpacity.setValue(0.7);
+        Animated.timing(tapIndicatorOpacity, {
+            toValue: 0,
+            duration: 800,
+            useNativeDriver: true,
+        }).start(() => {
+            setShowTapIndicator(false);
+        });
+
+        // Show controls
+        handleControlsVisibility();
     };
 
     if (loading) {
@@ -758,7 +1029,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                     onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
                                     onError={handleError}
                                     onLoad={handleLoad}
-                                    shouldPlay={false} // Start paused for better loading
+                                    shouldPlay={true} // Auto-play when loaded
                                     isLooping={false}
                                     volume={1.0}
                                     rate={1.0} // Normal playback speed
@@ -776,6 +1047,12 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                                 size={32}
                                                 color="#fff"
                                             />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity onPress={handleBackward} style={{ marginLeft: 16 }}>
+                                            <Ionicons name="play-skip-back" size={28} color="#fff" />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity onPress={handleForward} style={{ marginLeft: 16 }}>
+                                            <Ionicons name="play-skip-forward" size={28} color="#fff" />
                                         </TouchableOpacity>
                                         <TouchableOpacity onPress={handleFullScreen} style={{ marginLeft: 16 }}>
                                             <Ionicons name="expand" size={28} color="#fff" />
@@ -845,7 +1122,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                         <>
                             <TouchableOpacity
                                 style={styles.fullscreenVideo}
-                                onPress={handleControlsVisibility}
+                                onPress={handleScreenTap}
                                 onPressIn={handleTouchStart}
                                 onPressOut={handleTouchEnd}
                                 activeOpacity={1}
@@ -865,6 +1142,26 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                     volume={1.0}
                                     progressUpdateIntervalMillis={1000}
                                 />
+                                {/* Tap indicator - shows where user tapped */}
+                                {showTapIndicator && (
+                                    <Animated.View
+                                        style={[
+                                            styles.tapIndicator,
+                                            {
+                                                left: tapPosition.x - 25,
+                                                top: tapPosition.y - 25,
+                                                opacity: tapIndicatorOpacity
+                                            }
+                                        ]}
+                                    />
+                                )}
+                                {/* Back button to return to portrait mode */}
+                                <TouchableOpacity
+                                    style={styles.portraitBackButton}
+                                    onPress={handleExitFullScreen}
+                                >
+                                    <Ionicons name="arrow-back" size={28} color="#fff" />
+                                </TouchableOpacity>
                                 {/* Controls overlay in fullscreen */}
                                 {showControls && (
                                     <View style={styles.controlsFullscreen}>
@@ -877,6 +1174,20 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                                 size={32}
                                                 color="#fff"
                                             />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={handleBackward}
+                                            style={{ marginLeft: 16 }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Ionicons name="play-skip-back" size={28} color="#fff" />
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={handleForward}
+                                            style={{ marginLeft: 16 }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Ionicons name="play-skip-forward" size={28} color="#fff" />
                                         </TouchableOpacity>
                                         <TouchableOpacity
                                             onPress={handleExitFullScreen}
@@ -1145,6 +1456,24 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         textAlign: 'center',
+    },
+    portraitBackButton: {
+        position: 'absolute',
+        top: 20,
+        left: 20,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        padding: 8,
+        zIndex: 20,
+    },
+    tapIndicator: {
+        position: 'absolute',
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: 'rgba(255,255,255,0.5)',
+        borderWidth: 2,
+        borderColor: '#fff',
     },
 });
 
