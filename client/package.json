@@ -24,7 +24,7 @@
     "axios": "^1.6.2",
     "date-fns": "^4.1.0",
     "deprecated-react-native-prop-types": "^2.3.0",
-    "expo": "~50.0.0",
+    "expo": "^50.0.0",
     "expo-av": "~13.10.0",
     "expo-blur": "^14.1.5",
     "expo-constants": "~15.4.0",
