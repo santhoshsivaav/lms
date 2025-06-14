@@ -122,6 +122,21 @@ export const courseService = {
             console.error('Error fetching courses by categories:', error);
             return []; // Return empty array on error
         }
+    },
+
+    // Get lesson details
+    getLessonDetails: async (courseId, lessonId) => {
+        try {
+            const response = await api.get(`/courses/${courseId}/lesson/${lessonId}`);
+            // The server returns the lesson data directly without success/data wrapper
+            if (response.data && response.data._id) {
+                return response.data;
+            }
+            throw new Error('Invalid lesson data received');
+        } catch (error) {
+            console.error('Error in getLessonDetails:', error);
+            throw error;
+        }
     }
 };
 

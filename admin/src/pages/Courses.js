@@ -262,7 +262,10 @@ const Courses = () => {
 
                     if (moduleIndex !== undefined && lessonIndex !== undefined) {
                         handleEditLesson(moduleIndex, lessonIndex, 'type', 'pdf');
-                        handleEditLesson(moduleIndex, lessonIndex, 'pdfUrl', directUrl);
+                        handleEditLesson(moduleIndex, lessonIndex, 'content', {
+                            ...formData.modules[moduleIndex].lessons[lessonIndex].content,
+                            pdfUrl: directUrl
+                        });
                     } else {
                         setCurrentLesson(prev => ({
                             ...prev,
@@ -276,41 +279,8 @@ const Courses = () => {
                     }
                     setGoogleDriveUrl(''); // Reset the URL after successful upload
                 } else {
-                    // Handle video upload as before
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    formData.append('upload_preset', 'lms_app');
-                    formData.append('cloud_name', 'dzwr8crjj');
-
-                    const response = await fetch(
-                        `https://api.cloudinary.com/v1_1/dzwr8crjj/video/upload`,
-                        {
-                            method: 'POST',
-                            body: formData,
-                        }
-                    );
-
-                    if (!response.ok) {
-                        throw new Error('Upload failed');
-                    }
-
-                    const data = await response.json();
-                    setUploadProgress(100);
-
-                    if (moduleIndex !== undefined && lessonIndex !== undefined) {
-                        handleEditLesson(moduleIndex, lessonIndex, 'type', 'video');
-                        handleEditLesson(moduleIndex, lessonIndex, 'videoUrl', data.secure_url);
-                    } else {
-                        setCurrentLesson(prev => ({
-                            ...prev,
-                            type: 'video',
-                            content: {
-                                ...prev.content,
-                                videoUrl: data.secure_url,
-                                pdfUrl: ''
-                            }
-                        }));
-                    }
+                    // Not handling video file uploads anymore
+                    throw new Error('Please use the Google Drive link input for videos');
                 }
             } catch (err) {
                 console.error('Upload error:', err);
@@ -475,7 +445,7 @@ const Courses = () => {
         }));
     };
 
-    const handleGoogleDriveUrlSubmit = (moduleIndex, lessonIndex) => {
+    const handleGoogleDriveUrlSubmit = (moduleIndex, lessonIndex, type = 'pdf') => {
         try {
             if (!googleDriveUrl || !googleDriveUrl.startsWith('https://drive.google.com/')) {
                 throw new Error('Please provide a valid Google Drive URL');
@@ -489,19 +459,39 @@ const Courses = () => {
                 throw new Error('Invalid Google Drive URL format');
             }
 
-            const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            // For video, store the original sharing URL (our client will handle streaming)
+            // For PDF, use direct download URL
+            let directUrl;
+            if (type === 'video') {
+                // Store the original URL for videos - the client will handle streaming
+                directUrl = googleDriveUrl;
+            } else {
+                // For PDFs, use direct download URL
+                directUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            }
 
             if (moduleIndex !== undefined && lessonIndex !== undefined) {
-                handleEditLesson(moduleIndex, lessonIndex, 'type', 'pdf');
-                handleEditLesson(moduleIndex, lessonIndex, 'pdfUrl', directUrl);
+                handleEditLesson(moduleIndex, lessonIndex, 'type', type);
+                if (type === 'pdf') {
+                    handleEditLesson(moduleIndex, lessonIndex, 'content', {
+                        ...formData.modules[moduleIndex].lessons[lessonIndex].content,
+                        pdfUrl: directUrl,
+                        videoUrl: ''
+                    });
+                } else {
+                    handleEditLesson(moduleIndex, lessonIndex, 'content', {
+                        ...formData.modules[moduleIndex].lessons[lessonIndex].content,
+                        videoUrl: directUrl,
+                        pdfUrl: ''
+                    });
+                }
             } else {
                 setCurrentLesson(prev => ({
                     ...prev,
-                    type: 'pdf',
+                    type: type,
                     content: {
-                        ...prev.content,
-                        pdfUrl: directUrl,
-                        videoUrl: ''
+                        videoUrl: type === 'video' ? directUrl : '',
+                        pdfUrl: type === 'pdf' ? directUrl : ''
                     }
                 }));
             }
@@ -509,7 +499,7 @@ const Courses = () => {
             setError(null);
         } catch (err) {
             console.error('Error processing Google Drive URL:', err);
-            setError(err.message || 'Failed to process Google Drive URL');
+            setError(err.message || 'Invalid Google Drive URL');
         }
     };
 
@@ -1023,32 +1013,32 @@ const Courses = () => {
                                                                     />
                                                                     <Button
                                                                         variant="contained"
-                                                                        onClick={() => handleGoogleDriveUrlSubmit(moduleIndex, lessonIndex)}
+                                                                        onClick={() => handleGoogleDriveUrlSubmit(moduleIndex, lessonIndex, 'pdf')}
                                                                         disabled={!googleDriveUrl}
                                                                         fullWidth
                                                                     >
-                                                                        Update PDF URL
+                                                                        Save PDF Link
                                                                     </Button>
                                                                 </Box>
                                                             ) : (
-                                                                <Box>
-                                                                    <input
-                                                                        accept="video/*"
-                                                                        type="file"
-                                                                        id={`file-upload-${moduleIndex}-${lessonIndex}`}
-                                                                        onChange={(e) => handleFileUpload(e, moduleIndex, lessonIndex)}
-                                                                        style={{ display: 'none' }}
+                                                                <Box sx={{ mb: 2 }}>
+                                                                    <TextField
+                                                                        fullWidth
+                                                                        label="Google Drive Video URL"
+                                                                        value={googleDriveUrl}
+                                                                        onChange={(e) => setGoogleDriveUrl(e.target.value)}
+                                                                        placeholder="https://drive.google.com/file/d/..."
+                                                                        helperText="Paste the Google Drive sharing URL for your video"
+                                                                        sx={{ mb: 1 }}
                                                                     />
-                                                                    <label htmlFor={`file-upload-${moduleIndex}-${lessonIndex}`}>
-                                                                        <Button
-                                                                            variant="outlined"
-                                                                            component="span"
-                                                                            startIcon={<CloudUploadIcon />}
-                                                                            disabled={uploadingVideo}
-                                                                        >
-                                                                            Replace Video
-                                                                        </Button>
-                                                                    </label>
+                                                                    <Button
+                                                                        variant="contained"
+                                                                        onClick={() => handleGoogleDriveUrlSubmit(moduleIndex, lessonIndex, 'video')}
+                                                                        disabled={!googleDriveUrl}
+                                                                        fullWidth
+                                                                    >
+                                                                        Save Video Link
+                                                                    </Button>
                                                                 </Box>
                                                             )}
 
@@ -1133,34 +1123,32 @@ const Courses = () => {
                                                                     />
                                                                     <Button
                                                                         variant="contained"
-                                                                        onClick={() => handleGoogleDriveUrlSubmit()}
+                                                                        onClick={() => handleGoogleDriveUrlSubmit(undefined, undefined, 'pdf')}
                                                                         disabled={!googleDriveUrl}
                                                                         fullWidth
                                                                     >
-                                                                        Add PDF URL
+                                                                        Save PDF Link
                                                                     </Button>
                                                                 </Box>
                                                             ) : (
-                                                                <Box>
-                                                                    <input
-                                                                        accept="video/*"
-                                                                        type="file"
-                                                                        id="new-lesson-file-upload"
-                                                                        onChange={(e) => handleFileUpload(e)}
-                                                                        style={{ display: 'none' }}
+                                                                <Box sx={{ mb: 2 }}>
+                                                                    <TextField
+                                                                        fullWidth
+                                                                        label="Google Drive Video URL"
+                                                                        value={googleDriveUrl}
+                                                                        onChange={(e) => setGoogleDriveUrl(e.target.value)}
+                                                                        placeholder="https://drive.google.com/file/d/..."
+                                                                        helperText="Paste the Google Drive sharing URL for your video"
+                                                                        sx={{ mb: 1 }}
                                                                     />
-                                                                    <label htmlFor="new-lesson-file-upload">
-                                                                        <Button
-                                                                            variant="contained"
-                                                                            component="span"
-                                                                            startIcon={<CloudUploadIcon />}
-                                                                            disabled={uploadingVideo}
-                                                                            fullWidth
-                                                                            sx={{ mb: 1 }}
-                                                                        >
-                                                                            Upload Video
-                                                                        </Button>
-                                                                    </label>
+                                                                    <Button
+                                                                        variant="contained"
+                                                                        onClick={() => handleGoogleDriveUrlSubmit(undefined, undefined, 'video')}
+                                                                        disabled={!googleDriveUrl}
+                                                                        fullWidth
+                                                                    >
+                                                                        Save Video Link
+                                                                    </Button>
                                                                 </Box>
                                                             )}
 

@@ -36,17 +36,32 @@ export const courseService = {
     // Get video details with watermarked URL
     getVideoDetails: async (courseId, videoId) => {
         try {
+            console.log('Fetching video details:', { courseId, videoId });
             const response = await api.get(`/courses/${courseId}/lesson/${videoId}`);
-            if (!response.data.success) {
-                throw new Error(response.data.message || 'Failed to fetch video details');
+            console.log('Response:', response);
+
+            // Check if we have a valid response - the API might return the data directly
+            if (response.data) {
+                // Check if the response follows the success/data structure
+                if (response.data.success === false) {
+                    throw new Error(response.data.message || 'Failed to fetch video details');
+                }
+
+                // If the response directly contains the video data (no success/data wrapper)
+                if (response.data.content && response.data._id) {
+                    return response.data;
+                }
+
+                // If the response follows the standard success/data structure
+                if (response.data.data) {
+                    if (!response.data.data.content?.videoUrl) {
+                        throw new Error('Video URL not found in lesson content');
+                    }
+                    return response.data.data;
+                }
             }
 
-            // Ensure we have content and videoUrl in content
-            if (!response.data.data.content?.videoUrl) {
-                throw new Error('Video URL not found in lesson content');
-            }
-
-            return response.data.data;
+            throw new Error('Invalid response structure from API');
         } catch (error) {
             console.error('Error in getVideoDetails:', error);
             throw error;
@@ -251,5 +266,44 @@ export const courseService = {
         } catch (error) {
             throw error.response?.data || error.message;
         }
-    }
+    },
+
+    // Get original lesson content directly from course data
+    getOriginalLessonContent: async (courseId, lessonId) => {
+        try {
+            console.log('Fetching original lesson content for:', { courseId, lessonId });
+            // Get the full course data
+            const courseResponse = await api.get(`/courses/${courseId}`);
+
+            if (!courseResponse.data.success) {
+                throw new Error(courseResponse.data.message || 'Failed to fetch course data');
+            }
+
+            const course = courseResponse.data.data;
+
+            // Find the lesson in the course modules
+            let lessonContent = null;
+            if (course && course.modules) {
+                for (const module of course.modules) {
+                    if (module.lessons) {
+                        const lesson = module.lessons.find(l => l._id === lessonId);
+                        if (lesson) {
+                            console.log('Found original lesson content:', lesson);
+                            lessonContent = lesson;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!lessonContent) {
+                throw new Error('Lesson not found in course data');
+            }
+
+            return lessonContent;
+        } catch (error) {
+            console.error('Error in getOriginalLessonContent:', error);
+            throw error;
+        }
+    },
 }; 

@@ -19,6 +19,7 @@ import TermsPrivacyScreen from '../screens/TermsPrivacyScreen';
 import FAQsScreen from '../screens/FAQsScreen';
 import UserGuideScreen from '../screens/UserGuideScreen';
 import ReportIssueScreen from '../screens/ReportIssueScreen';
+import LessonDetailScreen from '../screens/main/LessonDetailScreen';
 
 
 // Context
@@ -90,7 +91,8 @@ const AppNavigator = () => {
                     <Stack.Screen name="Courses" component={CoursesScreen} />
                     <Stack.Screen name="CourseDetail" component={CourseDetailScreen} />
                     <Stack.Screen name="VideoPlayer" component={VideoPlayerScreen} />
-                    
+                    <Stack.Screen name="LessonDetail" component={LessonDetailScreen} />
+
                     <Stack.Screen
                         name="HelpSupport"
                         component={HelpSupportScreen}

@@ -24,6 +24,7 @@ import { COLORS } from '../../utils/theme';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
+import { createGoogleDriveStreamUrl, isGoogleDriveUrl, extractGoogleDriveFileId, findWorkingGoogleDriveUrl } from '../../utils/googleDriveHelper';
 
 
 const VideoPlayerScreen = ({ navigation, route }) => {
@@ -87,122 +88,61 @@ const VideoPlayerScreen = ({ navigation, route }) => {
         };
     }, []);
 
-    // Fetch video details
-    const fetchVideoDetails = async (retry = false) => {
-        try {
-            setLoading(true);
-            setError(null);
-
-            // Always allow screen capture during video loading to prevent issues
-            await ScreenCapture.allowScreenCaptureAsync();
-
-            console.log(`Fetching video details for courseId: ${courseId}, videoId: ${videoId}`);
-
-            // Check if the video is already completed
-            try {
-                const progressResponse = await courseService.getProgress(courseId);
-                console.log('Progress response:', progressResponse);
-
-                if (progressResponse && progressResponse.lessons) {
-                    // Find this specific lesson in progress data
-                    const lessonProgress = progressResponse.lessons.find(
-                        lesson => lesson.lessonId === videoId
-                    );
-
-                    if (lessonProgress && lessonProgress.completed) {
-                        console.log('Video is already marked as completed');
-                        setIsCompleted(true);
-
-                        // For completed videos, reset any saved position
-                        if (videoPositions.current) {
-                            // This will be set properly once we get the videoUrl
-                            prevPosition.current = 0;
-                            lastSavedPosition.current = 0;
-                        }
-                    }
-                }
-            } catch (progressErr) {
-                console.warn('Error checking video completion status:', progressErr);
-                // Continue anyway, as this is not critical
-            }
-
-            // First try with getVideoPlayerUrl which works in Expo Go
-            let response;
-            try {
-                response = await courseService.getVideoPlayerUrl(courseId, videoId);
-                console.log('Video player URL response:', JSON.stringify(response).substring(0, 200) + '...');
-            } catch (err) {
-                console.log('Failed with getVideoPlayerUrl, trying getVideoDetails');
-                // Fallback to getVideoDetails
-                response = await courseService.getVideoDetails(courseId, videoId);
-                console.log('Video details response:', JSON.stringify(response).substring(0, 200) + '...');
-            }
-
-            // Process video details
-            if (response) {
-                let videoUrl = '';
-
-                // Check various possible locations for video URL based on API response
-                if (response.videoUrl) {
-                    videoUrl = response.videoUrl;
-                } else if (response.content?.videoUrl) {
-                    videoUrl = response.content.videoUrl;
-                } else if (response.content?.video) {
-                    videoUrl = response.content.video;
-                }
-
-                console.log('Extracted video URL:', videoUrl);
-
-                if (!videoUrl) {
-                    throw new Error('No video URL found in response');
-                }
-
-                // Create a properly structured video object
-                const videoData = {
-                    ...response,
-                    videoUrl: videoUrl
-                };
-
-                setVideo(videoData);
-
-                // Test URL for production builds - if the original doesn't work
-                if (!__DEV__ && Platform.OS === 'android') {
-                    console.log('Production Android build - ensuring URL is accessible');
-
-                    // Check if URL is HTTP or HTTPS - force HTTPS in production
-                    if (videoUrl.startsWith('http:')) {
-                        videoData.videoUrl = videoUrl.replace('http:', 'https:');
-                        console.log('Converted URL to HTTPS:', videoData.videoUrl);
-                    }
-                }
-
-                setTimeout(() => {
-                    initializeVideoPlayer(videoData.videoUrl);
-                }, 500);
-            } else {
-                throw new Error('No video response data found');
-            }
-        } catch (err) {
-            console.error('Error fetching video details:', err);
-            setError('Failed to load video. ' + (err.message || ''));
-
-            // On network error, retry once
-            if (err.message && err.message.includes('network') && !retry) {
-                setTimeout(() => {
-                    fetchVideoDetails(true);
-                }, 3000);
-            }
-        } finally {
-            setLoading(false);
-        }
+    // Handle WebView load completion
+    const handleWebViewLoad = () => {
+        console.log('WebView loaded successfully');
+        setLoading(false);
+        // Start animation for watermark
+        startWatermarkAnimation();
     };
 
-    // Initialize video player
+    // Create HTML content for WebView with Google Drive embed
+    const createGoogleDriveEmbedHtml = (fileId) => {
+        return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+            body, html {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                background: #000;
+                overflow: hidden;
+            }
+            iframe {
+                width: 100%;
+                height: 100%;
+                border: none;
+            }
+            </style>
+        </head>
+        <body>
+            <iframe 
+                src="https://drive.google.com/file/d/${fileId}/preview" 
+                width="100%" 
+                height="100%" 
+                frameborder="0" 
+                allowfullscreen
+                allow="autoplay; encrypted-media"
+            ></iframe>
+        </body>
+        </html>
+        `;
+    };
+
+    // Initialize video player with improved Google Drive URL handling
     const initializeVideoPlayer = async (videoUrl) => {
         try {
+            console.log('Attempting to initialize video player with URL:', videoUrl);
+
+            // Check if videoRef is available
             if (!videoRef.current) {
                 console.error('Video ref not available');
-                return;
+                console.log('Will attempt to create Video component first');
+                return true;
             }
 
             if (!isNetworkAvailable) {
@@ -232,7 +172,6 @@ const VideoPlayerScreen = ({ navigation, route }) => {
             // For completed videos, always start from the beginning
             if (isCompleted) {
                 console.log('Loading completed video - starting from beginning');
-                // Reset any saved position
                 if (videoUrl) {
                     videoPositions.current[videoUrl] = 0;
                 }
@@ -245,13 +184,17 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                 console.log(`Using saved position: ${startPosition}ms`);
             }
 
-            // Use basic configuration for maximum compatibility
+            // Handle Google Drive URLs specially
+            let finalVideoUrl = videoUrl;
+            let isGDrive = isGoogleDriveUrl(videoUrl);
+
+            // Basic configuration for regular videos
             const loadConfig = {
-                shouldPlay: true, // Auto-play the video
+                shouldPlay: true,
                 isMuted: false,
                 volume: 1.0,
                 progressUpdateIntervalMillis: 1000,
-                positionMillis: startPosition, // Start from saved position if available
+                positionMillis: startPosition,
                 rate: 1.0,
                 shouldCorrectPitch: true,
                 useNativeControls: false,
@@ -259,42 +202,55 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                 resizeMode: ResizeMode.CONTAIN
             };
 
+            // Special handling and configuration for Google Drive videos
+            if (isGDrive) {
+                console.log('Detected Google Drive URL - trying to find best streaming URL');
+                const result = await findWorkingGoogleDriveUrl(videoUrl);
+                if (result) {
+                    finalVideoUrl = result.url;
+                    console.log(`Using Google Drive URL format type ${result.type}:`, finalVideoUrl);
+
+                    // Add special headers for Google Drive
+                    loadConfig.headers = {
+                        'Range': 'bytes=0-',
+                        'Referer': 'https://drive.google.com/',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36'
+                    };
+                }
+            }
+
             console.log('Loading video with config:', loadConfig);
 
             // Add retry mechanism for loading
             let retryCount = 0;
-            const maxRetries = 5; // Increased retries
+            const maxRetries = 5;
 
             const attemptLoad = async () => {
                 try {
                     // Add more validation before proceeding
-                    if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.includes('://')) {
-                        throw new Error(`Invalid video URL format: ${videoUrl}`);
+                    if (!finalVideoUrl || typeof finalVideoUrl !== 'string' || !finalVideoUrl.includes('://')) {
+                        throw new Error(`Invalid video URL format: ${finalVideoUrl}`);
                     }
 
-                    // First, verify the video URL is accessible - but handle network errors gracefully
-                    let isUrlAccessible = false;
-                    try {
-                        const response = await fetch(videoUrl, { method: 'HEAD', timeout: 5000 });
-                        isUrlAccessible = response.ok;
-                        if (!isUrlAccessible) {
-                            console.warn(`Video URL response not OK: ${response.status}`);
-                        }
-                    } catch (urlError) {
-                        console.warn('Error checking video URL accessibility (continuing anyway):', urlError);
-                        // Continue anyway as some servers might block HEAD requests
-                    }
-
-                    // Try to load the video even if HEAD request failed - it might still work
+                    // Try to load the video
                     console.log(`Loading video attempt ${retryCount + 1}/${maxRetries}...`);
 
+                    // Check again if videoRef is available before attempting to use it
+                    if (!videoRef.current) {
+                        console.warn('Video ref still not available, cannot load video yet');
+                        return false;
+                    }
+
                     const loadResult = await videoRef.current.loadAsync(
-                        { uri: videoUrl },
+                        {
+                            uri: finalVideoUrl,
+                            headers: loadConfig.headers || undefined
+                        },
                         loadConfig,
                         false
                     );
 
-                    console.log('Video load result:', loadResult);
+                    console.log('Current playback status:', await videoRef.current.getStatusAsync());
 
                     if (loadResult && loadResult.isLoaded) {
                         console.log('Video loaded successfully');
@@ -308,8 +264,11 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                         if (videoRef.current) {
                             // Start playback with error handling
                             try {
+                                console.log('Playing video');
                                 const playResult = await videoRef.current.playAsync();
                                 console.log('Play result:', playResult);
+                                // Start the watermark animation
+                                startWatermarkAnimation();
                                 return true; // Success!
                             } catch (playError) {
                                 console.error('Error starting playback:', playError);
@@ -319,29 +278,81 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                     } else {
                         throw new Error('Video load result invalid');
                     }
-                } catch (loadError) {
-                    console.error(`Load attempt ${retryCount + 1} failed:`, loadError);
+                } catch (error) {
+                    console.error(`Error loading video (attempt ${retryCount + 1}/${maxRetries}):`, error);
+
+                    // Special handling for Google Drive URLs - try different formats on failures
+                    if (isGDrive && retryCount < 3) {
+                        console.log('Trying alternative Google Drive URL format');
+                        const urlTypes = [7, 4, 6, 0]; // Prioritize formats that work better for video rendering
+                        const urlType = urlTypes[retryCount % urlTypes.length];
+                        const alternativeUrl = createGoogleDriveStreamUrl(videoUrl, urlType);
+                        if (alternativeUrl && alternativeUrl !== finalVideoUrl) {
+                            console.log(`Switching to alternative URL format (type ${urlType}):`, alternativeUrl);
+                            finalVideoUrl = alternativeUrl;
+                        }
+                    }
 
                     if (retryCount < maxRetries - 1) {
                         retryCount++;
-                        console.log(`Retrying load (${retryCount}/${maxRetries})...`);
-
-                        // Increase delay between retries
-                        const delay = 1000 + (retryCount * 500);
+                        const delay = Math.min(2000 * retryCount, 10000);
+                        console.log(`Retrying in ${delay / 1000} seconds...`);
                         await new Promise(resolve => setTimeout(resolve, delay));
-
-                        return attemptLoad(); // Retry recursively
-                    } else {
-                        throw new Error('Failed to load video after multiple attempts');
+                        return attemptLoad(); // Recursively try again
                     }
+                    throw error; // Re-throw after max retries
                 }
             };
 
-            await attemptLoad();
+            // Start the loading process
+            return await attemptLoad();
 
-        } catch (err) {
-            console.error('Error initializing video player:', err);
-            handleError(err);
+        } catch (error) {
+            console.error('Failed to initialize video player:', error);
+            handleError(error);
+            return false;
+        }
+    };
+
+    // Modify fetchVideo to handle Google Drive URLs for direct playback
+    const fetchVideo = async () => {
+        try {
+            setLoading(true);
+            setError(null);
+
+            // Get video data from course service
+            const videoData = await courseService.getVideoDetails(courseId, videoId);
+            console.log('Fetched video data:', videoData);
+
+            if (!videoData || !videoData.content) {
+                throw new Error('Video data not found');
+            }
+
+            const videoUrl = videoData.content.videoUrl;
+
+            if (!videoUrl) {
+                throw new Error('Video URL not available');
+            }
+
+            const isGDrive = isGoogleDriveUrl(videoUrl);
+            const fileId = isGDrive ? extractGoogleDriveFileId(videoUrl) : null;
+
+            // Set the video data
+            setVideo({
+                ...videoData,
+                videoUrl: videoUrl,
+                originalUrl: videoUrl,
+                isGoogleDrive: isGDrive,
+                fileId: fileId
+            });
+
+            setLoading(false);
+            // The player will be initialized by the useEffect hook when the component is ready
+
+        } catch (error) {
+            console.error('Error fetching video:', error);
+            setError(error.message || 'An error occurred while fetching the video');
+            setLoading(false);
         }
     };
 
@@ -460,7 +471,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
 
     // Initialize on mount
     useEffect(() => {
-        fetchVideoDetails();
+        fetchVideo();
 
         return () => {
             if (progressInterval.current) {
@@ -540,7 +551,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
         };
     }, []);
 
-    const togglePlayPause = async () => {
+    const togglePlayback = async () => {
         if (isOrientationChanging.current) return;
 
         try {
@@ -906,6 +917,16 @@ const VideoPlayerScreen = ({ navigation, route }) => {
             errorMessage += 'Playback error. Please try again.';
         } else if (error.message.includes('URL not accessible')) {
             errorMessage += 'Video source is not accessible. Please try again later.';
+        } else if (error.message.includes('Google Drive') || (video?.videoUrl && video.videoUrl.includes('drive.google.com'))) {
+            errorMessage = 'Google Drive video playback failed. Please ensure the video is shared with "Anyone with the link" permission and try again.';
+        } else if (error.message.includes('Response code: 400') || error.message.includes('403')) {
+            // Check if we have a Cloudinary URL with embedded Google Drive URL
+            if (video?.videoUrl && video.videoUrl.includes('cloudinary.com') && video.videoUrl.includes('drive.google.com')) {
+                errorMessage = 'The video cannot be played because the Google Drive link inside the Cloudinary URL is not accessible. Please upload the video directly to Google Drive and share it with "Anyone with the link" permission.';
+            } else {
+                // Likely a permission issue with Google Drive
+                errorMessage = 'Access denied. If this is a Google Drive video, please ensure it is shared with "Anyone with the link" permission.';
+            }
         } else {
             errorMessage += error.message || 'Please try again.';
         }
@@ -923,7 +944,14 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                             // Verify network before retrying
                             NetInfo.fetch().then(state => {
                                 if (state.isConnected) {
-                                    initializeVideoPlayer(video.videoUrl);
+                                    // Check if it's a Google Drive URL that might be failing
+                                    if (video.videoUrl.includes('drive.google.com')) {
+                                        console.log('Google Drive video failed, not auto-retrying');
+                                        setError('Google Drive video playback failed. Please make sure the video is shared with "Anyone with the link" permission.');
+                                    } else {
+                                        console.log('Retrying video load after error...');
+                                        fetchVideo();
+                                    }
                                 } else {
                                     setError('No internet connection. Please check your connection and try again.');
                                 }
@@ -957,6 +985,128 @@ const VideoPlayerScreen = ({ navigation, route }) => {
         handleControlsVisibility();
     };
 
+    // Initialize animation for watermark
+    useEffect(() => {
+        if (video && containerWidth > 0 && containerHeight > 0) {
+            // Start the animation when video is loaded and container dimensions are available
+            console.log('Starting watermark animation');
+            animateCorners();
+        }
+    }, [video, containerWidth, containerHeight]);
+
+    // Animation for watermark to move across screen corners
+    const animateCorners = () => {
+        const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+        const maxWidth = screenWidth - 150;
+        const maxHeight = screenHeight - 40;
+
+        // Create a sequence of animations to each corner
+        Animated.sequence([
+            // Top right
+            Animated.parallel([
+                Animated.timing(animatedX, {
+                    toValue: maxWidth,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+                Animated.timing(animatedY, {
+                    toValue: 20,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+            ]),
+            // Bottom right
+            Animated.parallel([
+                Animated.timing(animatedX, {
+                    toValue: maxWidth,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+                Animated.timing(animatedY, {
+                    toValue: maxHeight,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+            ]),
+            // Bottom left
+            Animated.parallel([
+                Animated.timing(animatedX, {
+                    toValue: 20,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+                Animated.timing(animatedY, {
+                    toValue: maxHeight,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+            ]),
+            // Top left
+            Animated.parallel([
+                Animated.timing(animatedX, {
+                    toValue: 20,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+                Animated.timing(animatedY, {
+                    toValue: 20,
+                    duration: 3000,
+                    easing: Easing.linear,
+                    useNativeDriver: false,
+                }),
+            ]),
+        ]).start(() => {
+            // Loop animation endlessly
+            animateCorners();
+        });
+    };
+
+    // Start the watermark animation
+    const startWatermarkAnimation = () => {
+        console.log('Starting watermark animation');
+        animateCorners();
+    };
+
+    // Add onLayout handler for the Video component
+    const handleVideoComponentLayout = () => {
+        console.log('Video component layout completed');
+        // If we have video data but the player hasn't been initialized yet, initialize it now
+        if (video?.videoUrl && !status.isLoaded && videoRef.current) {
+            console.log('Initializing player after video component layout');
+            initializeVideoPlayer(video.videoUrl).catch(error => {
+                console.error('Error initializing player after layout:', error);
+            });
+        }
+    };
+
+    // Add a function to manually load the video when the ref is available
+    const loadVideoWhenRefAvailable = () => {
+        if (videoRef.current && video?.videoUrl && !status.isLoaded) {
+            console.log('Video ref is now available, loading video');
+            initializeVideoPlayer(video.videoUrl).catch(error => {
+                console.error('Error loading video after ref available:', error);
+            });
+        }
+    };
+
+    // Use a separate effect to initialize the player when the ref is available
+    useEffect(() => {
+        if (video?.videoUrl && videoRef.current) {
+            const timer = setTimeout(() => {
+                loadVideoWhenRefAvailable();
+            }, 500); // Give time for the ref to be properly set up
+
+            return () => clearTimeout(timer);
+        }
+    }, [video, videoRef.current]);
+
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
@@ -969,15 +1119,17 @@ const VideoPlayerScreen = ({ navigation, route }) => {
     if (error) {
         return (
             <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={60} color={COLORS.error} />
                 <Text style={styles.errorText}>{error}</Text>
                 <TouchableOpacity
                     style={styles.retryButton}
                     onPress={() => {
                         setError(null);
-                        fetchVideoDetails();
+                        setRetryCount(prev => prev + 1);
+                        fetchVideo();
                     }}
                 >
-                    <Text style={styles.retryButtonText}>Retry</Text>
+                    <Text style={styles.retryText}>Retry</Text>
                 </TouchableOpacity>
             </View>
         );
@@ -1013,103 +1165,83 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                         setContainerHeight(e.nativeEvent.layout.height);
                     }}
                 >
-                    {video?.videoUrl ? (
-                        <>
-                            <TouchableOpacity
-                                style={styles.videoTouchable}
-                                onPress={handleControlsVisibility}
-                                activeOpacity={1}
+                    <View style={{ flex: 1 }}>
+                        <Video
+                            ref={videoRef}
+                            style={styles.video}
+                            resizeMode={ResizeMode.CONTAIN}
+                            useNativeControls={false}
+                            onError={handleError}
+                            onLoad={handleLoad}
+                            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+                            onFullscreenUpdate={handleFullscreenUpdate}
+                            onLayout={handleVideoComponentLayout}
+                            progressUpdateIntervalMillis={500}
+                            shouldPlay
+                            isMuted={false}
+                            rate={1.0}
+                            volume={1.0}
+                            overrideFileExtensionAndroid="mp4"
+                        />
+
+                        {/* Black box overlay in center */}
+                        <View style={styles.centerBox} />
+
+                        {/* Moving watermark overlay */}
+                        {user?.email && (
+                            <Animated.View
+                                style={[
+                                    styles.watermark,
+                                    {
+                                        left: animatedX,
+                                        top: animatedY,
+                                    },
+                                ]}
+                                pointerEvents="none"
                             >
-                                <Video
-                                    ref={videoRef}
-                                    style={styles.video}
-                                    source={{ uri: video.videoUrl }}
-                                    useNativeControls={false}
-                                    resizeMode={ResizeMode.CONTAIN}
-                                    onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                                    onError={handleError}
-                                    onLoad={handleLoad}
-                                    shouldPlay={true} // Auto-play when loaded
-                                    isLooping={false}
-                                    volume={1.0}
-                                    rate={1.0} // Normal playback speed
-                                    positionMillis={0}
-                                    progressUpdateIntervalMillis={500} // More frequent updates
-                                    onReadyForDisplay={() => console.log('Video ready for display')}
-                                    onFullscreenUpdate={handleFullscreenUpdate}
+                                <Text style={styles.watermarkText}>{user.email}</Text>
+                            </Animated.View>
+                        )}
+                    </View>
+
+                    {/* Controls overlay */}
+                    {showControls && (
+                        <View style={styles.controls}>
+                            <TouchableOpacity onPress={togglePlayback}>
+                                <Ionicons
+                                    name={status.isPlaying ? "pause" : "play"}
+                                    size={24}
+                                    color="#fff"
                                 />
-                                {/* Controls overlay */}
-                                {showControls && (
-                                    <View style={styles.controls}>
-                                        <TouchableOpacity onPress={togglePlayPause}>
-                                            <Ionicons
-                                                name={status.isPlaying ? "pause" : "play"}
-                                                size={32}
-                                                color="#fff"
-                                            />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity onPress={handleBackward} style={{ marginLeft: 16 }}>
-                                            <Ionicons name="play-skip-back" size={28} color="#fff" />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity onPress={handleForward} style={{ marginLeft: 16 }}>
-                                            <Ionicons name="play-skip-forward" size={28} color="#fff" />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity onPress={handleFullScreen} style={{ marginLeft: 16 }}>
-                                            <Ionicons name="expand" size={28} color="#fff" />
-                                        </TouchableOpacity>
-                                        <View style={styles.progressContainer}>
-                                            <Text style={styles.timeText}>
-                                                {formatTime(status.positionMillis)}
-                                            </Text>
-                                            <View style={styles.progressBar}>
-                                                <View
-                                                    style={[
-                                                        styles.progress,
-                                                        {
-                                                            width: `${status.positionMillis && status.durationMillis ?
-                                                                (status.positionMillis / status.durationMillis) * 100 : 0}%`
-                                                        }
-                                                    ]}
-                                                />
-                                            </View>
-                                            <Text style={styles.timeText}>
-                                                {formatTime(status.durationMillis)}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                )}
                             </TouchableOpacity>
-                            {/* Portrait button in landscape/fullscreen mode */}
-                            {isLandscape && (
-                                <TouchableOpacity
-                                    style={styles.portraitButton}
-                                    onPress={async () => {
-                                        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-                                        setIsLandscape(false);
-                                    }}
-                                >
-                                    <Ionicons name="phone-portrait-outline" size={28} color="#fff" />
-                                </TouchableOpacity>
-                            )}
-                            {/* Moving watermark overlay */}
-                            {user?.email && (
-                                <Animated.View
-                                    style={[
-                                        styles.watermark,
-                                        {
-                                            left: animatedX,
-                                            top: animatedY,
-                                        },
-                                    ]}
-                                    pointerEvents="none"
-                                >
-                                    <Text style={styles.watermarkText}>{user.email}</Text>
-                                </Animated.View>
-                            )}
-                        </>
-                    ) : (
-                        <View style={styles.noVideoContainer}>
-                            <Text style={styles.noVideoText}>No video URL available</Text>
+                            <TouchableOpacity onPress={handleBackward} style={{ marginLeft: 16 }}>
+                                <Ionicons name="play-skip-back" size={28} color="#fff" />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleForward} style={{ marginLeft: 16 }}>
+                                <Ionicons name="play-skip-forward" size={28} color="#fff" />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleFullScreen} style={{ marginLeft: 16 }}>
+                                <Ionicons name="expand" size={28} color="#fff" />
+                            </TouchableOpacity>
+                            <View style={styles.progressContainer}>
+                                <Text style={styles.timeText}>
+                                    {formatTime(status.positionMillis)}
+                                </Text>
+                                <View style={styles.progressBar}>
+                                    <View
+                                        style={[
+                                            styles.progress,
+                                            {
+                                                width: `${status.positionMillis && status.durationMillis ?
+                                                    (status.positionMillis / status.durationMillis) * 100 : 0}%`
+                                            }
+                                        ]}
+                                    />
+                                </View>
+                                <Text style={styles.timeText}>
+                                    {formatTime(status.durationMillis)}
+                                </Text>
+                            </View>
                         </View>
                     )}
                 </View>
@@ -1141,6 +1273,8 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                     isLooping={false}
                                     volume={1.0}
                                     progressUpdateIntervalMillis={1000}
+                                    onLayout={handleVideoComponentLayout}
+                                    overrideFileExtensionAndroid="mp4"
                                 />
                                 {/* Tap indicator - shows where user tapped */}
                                 {showTapIndicator && (
@@ -1166,7 +1300,7 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                 {showControls && (
                                     <View style={styles.controlsFullscreen}>
                                         <TouchableOpacity
-                                            onPress={togglePlayPause}
+                                            onPress={togglePlayback}
                                             activeOpacity={0.7}
                                         >
                                             <Ionicons
@@ -1218,21 +1352,6 @@ const VideoPlayerScreen = ({ navigation, route }) => {
                                     </View>
                                 )}
                             </TouchableOpacity>
-                            {/* Watermark overlay in fullscreen */}
-                            {user?.email && (
-                                <Animated.View
-                                    style={[
-                                        styles.watermark,
-                                        {
-                                            left: animatedX,
-                                            top: animatedY,
-                                        },
-                                    ]}
-                                    pointerEvents="none"
-                                >
-                                    <Text style={styles.watermarkText}>{user.email}</Text>
-                                </Animated.View>
-                            )}
                         </>
                     )}
                 </View>
@@ -1351,7 +1470,7 @@ const styles = StyleSheet.create({
     retryButton: {
         backgroundColor: '#27ae60',
     },
-    retryButtonText: {
+    retryText: {
         color: '#fff',
         fontSize: 16,
     },
@@ -1474,6 +1593,23 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.5)',
         borderWidth: 2,
         borderColor: '#fff',
+    },
+    webViewOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'transparent',
+    },
+    centerBox: {
+        position: 'absolute',
+        width: 100,
+        height: 100,
+        backgroundColor: '#000',
+        top: 20,
+        right: 20,
+        zIndex: 9999,
     },
 });
 

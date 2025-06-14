@@ -13,7 +13,46 @@ import { courseService } from '../../api/courseService';
 import { AuthContext } from '../../context/AuthContext';
 import { COLORS } from '../../constants/Colors';
 import { WebView } from 'react-native-webview';
-import VideoPlayer from '../../components/VideoPlayer';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { BlurView } from 'expo-blur';
+
+// Use a public logo URL or replace with your own
+const LOGO_URL = 'https://drive.google.com/file/d/1t6XXEo0qXbU8YHwUv18M6dEoIK5pfuo-/view?usp=sharing'; // Replace with your real logo
+
+// We'll define the injectedJavaScript as a function so we can conditionally inject it based on orientation
+const getInjectedJavaScript = (orientation) => {
+    if (orientation !== 'LANDSCAPE') return '';
+    return `
+    setInterval(function() {
+      var openBtn = document.querySelector('div[aria-label="Open in new window"], div[aria-label="Open in new tab"]');
+      var overlay = document.getElementById('custom-solid-overlay');
+      if (openBtn) {
+        var rect = openBtn.getBoundingClientRect();
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'custom-solid-overlay';
+          overlay.style.position = 'fixed';
+          overlay.style.left = rect.left + 'px';
+          overlay.style.top = rect.top + 'px';
+          overlay.style.width = rect.width + 'px';
+          overlay.style.height = rect.height + 'px';
+          overlay.style.zIndex = '999999';
+          overlay.style.pointerEvents = 'auto';
+          overlay.style.background = 'black';
+          document.body.appendChild(overlay);
+        } else {
+          overlay.style.left = rect.left + 'px';
+          overlay.style.top = rect.top + 'px';
+          overlay.style.width = rect.width + 'px';
+          overlay.style.height = rect.height + 'px';
+        }
+      } else if (overlay) {
+        overlay.remove();
+      }
+    }, 1000);
+    true;
+  `;
+};
 
 const LessonDetailScreen = ({ route, navigation }) => {
     const { courseId, lessonId } = route.params;
@@ -23,6 +62,35 @@ const LessonDetailScreen = ({ route, navigation }) => {
     const { user } = useContext(AuthContext);
     const screenWidth = Dimensions.get('window').width;
     const screenHeight = Dimensions.get('window').height;
+    const [orientation, setOrientation] = useState('LANDSCAPE');
+
+    useEffect(() => {
+        // Lock to landscape on mount
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+
+        // Listen for orientation changes
+        const subscription = ScreenOrientation.addOrientationChangeListener((event) => {
+            const o = event.orientationInfo.orientation;
+            if (o === ScreenOrientation.Orientation.PORTRAIT_UP || o === ScreenOrientation.Orientation.PORTRAIT_DOWN) {
+                setOrientation('PORTRAIT');
+            } else if (
+                o === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+                o === ScreenOrientation.Orientation.LANDSCAPE_RIGHT
+            ) {
+                setOrientation('LANDSCAPE');
+            }
+        });
+
+        return () => {
+            ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+            ScreenOrientation.removeOrientationChangeListener(subscription);
+        };
+    }, []);
+
+    // Handler for manual landscape button
+    const handleGoLandscape = async () => {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    };
 
     useEffect(() => {
         fetchLessonDetails();
@@ -71,8 +139,8 @@ const LessonDetailScreen = ({ route, navigation }) => {
                             domStorageEnabled={true}
                             startInLoadingState={true}
                             scalesPageToFit={true}
+                            injectedJavaScript={getInjectedJavaScript(orientation)}
                             onShouldStartLoadWithRequest={(request) => {
-                                // Only allow loading the PDF viewer URL
                                 return request.url.startsWith('https://drive.google.com/file/d/');
                             }}
                         />
@@ -90,7 +158,34 @@ const LessonDetailScreen = ({ route, navigation }) => {
 
         // Check if the lesson has a video
         if (lesson.type === 'video' && lesson.content?.videoUrl) {
-            return <VideoPlayer uri={lesson.content.videoUrl} />;
+            try {
+                const viewerUrl = getGoogleDriveViewerUrl(lesson.content.videoUrl);
+                return (
+                    <View style={styles.pdfContainer}>
+                        <WebView
+                            source={{ uri: viewerUrl }}
+                            style={styles.pdfViewer}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            startInLoadingState={true}
+                            allowsFullscreenVideo={true}
+                            allowsInlineMediaPlayback={true}
+                            mediaPlaybackRequiresUserAction={false}
+                            injectedJavaScript={getInjectedJavaScript(orientation)}
+                            onShouldStartLoadWithRequest={(request) => {
+                                return request.url.startsWith('https://drive.google.com/file/d/');
+                            }}
+                        />
+                    </View>
+                );
+            } catch (err) {
+                console.error('Error loading video:', err);
+                return (
+                    <View style={styles.errorContainer}>
+                        <Text style={styles.errorText}>Failed to load video</Text>
+                    </View>
+                );
+            }
         }
 
         return (
@@ -118,16 +213,30 @@ const LessonDetailScreen = ({ route, navigation }) => {
 
     return (
         <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity
-                    onPress={() => navigation.goBack()}
-                    style={styles.backButton}
-                >
-                    <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-                </TouchableOpacity>
-                <Text style={styles.title}>{lesson.title}</Text>
-            </View>
+            {/* Only show header in portrait mode */}
+            {orientation === 'PORTRAIT' && (
+                <View style={styles.header}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                        <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+                    </TouchableOpacity>
+                    <Text style={styles.title}>{lesson?.title}</Text>
+                    <TouchableOpacity onPress={handleGoLandscape} style={{ marginLeft: 16 }}>
+                        <Ionicons name="phone-landscape-outline" size={24} color={COLORS.text} />
+                    </TouchableOpacity>
+                </View>
+            )}
             {renderContent()}
+            {/* Custom back button overlay in landscape mode */}
+            {orientation === 'LANDSCAPE' && (
+                <TouchableOpacity
+                    style={styles.landscapeBackButton}
+                    onPress={() => navigation.goBack()}
+                >
+                    <Ionicons name="arrow-back" size={28} color="#fff" />
+                </TouchableOpacity>
+            )}
+            {/* Blur overlay */}
+            <BlurView intensity={10} style={styles.blurBox} />
         </SafeAreaView>
     );
 };
@@ -188,6 +297,25 @@ const styles = StyleSheet.create({
         color: COLORS.text,
         textAlign: 'center',
         fontSize: 16,
+    },
+    landscapeBackButton: {
+        position: 'absolute',
+        top: 30,
+        left: 20,
+        zIndex: 10,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 20,
+        padding: 6,
+    },
+    blurBox: {
+        position: 'absolute',
+        width: 70,
+        height: 70,
+        top: 10,
+        right: 10,
+        zIndex: 9999,
+        borderRadius: 20,
+        overflow: 'hidden',
     },
 });
 

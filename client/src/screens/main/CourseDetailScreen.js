@@ -106,27 +106,11 @@ const CourseDetailScreen = ({ route, navigation }) => {
             type: lesson.type
         });
 
-        if (lesson.type === 'video' && lesson.content?.videoUrl) {
-            navigation.navigate('VideoPlayer', {
-                courseId,
-                videoId: lesson._id,
-                videoTitle: lesson.title
-            });
-        } else if (lesson.type === 'pdf' && lesson.content?.pdfUrl) {
-            try {
-                const supported = await Linking.canOpenURL(lesson.content.pdfUrl);
-                if (supported) {
-                    await Linking.openURL(lesson.content.pdfUrl);
-                } else {
-                    Alert.alert('Error', 'Cannot open PDF URL');
-                }
-            } catch (error) {
-                console.error('Error opening PDF:', error);
-                Alert.alert('Error', 'Failed to open PDF');
-            }
-        } else {
-            Alert.alert('Error', 'No content available for this lesson');
-        }
+        navigation.navigate('LessonDetail', {
+            courseId,
+            lessonId: lesson._id,
+            lessonTitle: lesson.title
+        });
     };
 
     if (loading) {
