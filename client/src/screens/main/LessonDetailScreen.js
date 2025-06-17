@@ -18,11 +18,17 @@ import { BlurView } from 'expo-blur';
 
 // Use a public logo URL or replace with your own
 const LOGO_URL = 'https://drive.google.com/file/d/1t6XXEo0qXbU8YHwUv18M6dEoIK5pfuo-/view?usp=sharing'; // Replace with your real logo
+// Will be populated with user email from context
 
 // We'll define the injectedJavaScript as a function so we can conditionally inject it based on orientation
-const getInjectedJavaScript = (orientation) => {
-    if (orientation !== 'LANDSCAPE') return '';
-    return `
+const getInjectedJavaScript = (orientation, contentType, userEmail) => {
+    const watermarkText = userEmail || 'Watermark';
+    let script = '';
+
+    if (orientation !== 'LANDSCAPE') return script;
+
+    // Base script for all content types
+    script = `
     setInterval(function() {
       var openBtn = document.querySelector('div[aria-label="Open in new window"], div[aria-label="Open in new tab"]');
       var overlay = document.getElementById('custom-solid-overlay');
@@ -50,8 +56,50 @@ const getInjectedJavaScript = (orientation) => {
         overlay.remove();
       }
     }, 1000);
-    true;
-  `;
+    `;
+
+    // Add watermark for video content
+    if (contentType === 'video') {
+        script += `
+      // Create watermark element
+      var watermark = document.createElement('div');
+      watermark.id = 'video-watermark';
+      watermark.innerText = '${watermarkText}';
+      watermark.style.position = 'fixed';
+      watermark.style.zIndex = '999998';
+      watermark.style.color = 'rgba(255, 255, 255, 0.7)';
+      watermark.style.fontSize = '24px';
+      watermark.style.fontWeight = 'bold';
+      watermark.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)';
+      watermark.style.padding = '10px';
+      watermark.style.pointerEvents = 'none';
+      document.body.appendChild(watermark);
+      
+      // Position watermark initially
+      watermark.style.top = '20px';
+      watermark.style.left = '20px';
+      
+      // Move watermark around at intervals
+      var positions = [
+        { top: '20px', left: '20px' },
+        { top: '20px', right: '20px', left: 'auto' },
+        { bottom: '20px', right: '20px', top: 'auto', left: 'auto' },
+        { bottom: '20px', left: '20px', top: 'auto', right: 'auto' }
+      ];
+      var posIndex = 0;
+      
+      setInterval(function() {
+        posIndex = (posIndex + 1) % positions.length;
+        var pos = positions[posIndex];
+        Object.keys(pos).forEach(function(key) {
+          watermark.style[key] = pos[key];
+        });
+      }, 5000);
+      `;
+    }
+
+    script += 'true;';
+    return script;
 };
 
 const LessonDetailScreen = ({ route, navigation }) => {
@@ -139,7 +187,7 @@ const LessonDetailScreen = ({ route, navigation }) => {
                             domStorageEnabled={true}
                             startInLoadingState={true}
                             scalesPageToFit={true}
-                            injectedJavaScript={getInjectedJavaScript(orientation)}
+                            injectedJavaScript={getInjectedJavaScript(orientation, 'pdf', user?.email)}
                             onShouldStartLoadWithRequest={(request) => {
                                 return request.url.startsWith('https://drive.google.com/file/d/');
                             }}
@@ -171,7 +219,7 @@ const LessonDetailScreen = ({ route, navigation }) => {
                             allowsFullscreenVideo={true}
                             allowsInlineMediaPlayback={true}
                             mediaPlaybackRequiresUserAction={false}
-                            injectedJavaScript={getInjectedJavaScript(orientation)}
+                            injectedJavaScript={getInjectedJavaScript(orientation, 'video', user?.email)}
                             onShouldStartLoadWithRequest={(request) => {
                                 return request.url.startsWith('https://drive.google.com/file/d/');
                             }}

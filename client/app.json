@@ -21,11 +21,11 @@
     "extra": {
       "apiUrl": "https://lms-yunus-app.onrender.com/api",
       "eas": {
-        "projectId": "890d16b8-72ef-4d4a-857b-7edecbb7cf4b"
+        "projectId": "e1c0511c-0803-42b6-b9fb-b7376b091f0b"
       }
     },
     "android": {
-      "package": "com.yunus3408.Yunusapp",
+      "package": "com.santhoshsivaav03.Yunusapp",
       "permissions": [
         "INTERNET",
         "READ_EXTERNAL_STORAGE",
@@ -35,7 +35,9 @@
         "MODIFY_AUDIO_SETTINGS",
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
