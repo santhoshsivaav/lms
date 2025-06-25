@@ -14,6 +14,7 @@ import { AuthContext } from '../../context/AuthContext';
 import { COLORS } from '../../constants/Colors';
 import { WebView } from 'react-native-webview';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as ScreenCapture from 'expo-screen-capture';
 import { BlurView } from 'expo-blur';
 
 // Use a public logo URL or replace with your own
@@ -132,6 +133,21 @@ const LessonDetailScreen = ({ route, navigation }) => {
         return () => {
             ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
             ScreenOrientation.removeOrientationChangeListener(subscription);
+        };
+    }, []);
+
+    // Screen capture protection effect
+    useEffect(() => {
+        // Prevent screen capture when the component mounts
+        const preventScreenCapture = async () => {
+            await ScreenCapture.preventScreenCaptureAsync();
+        };
+
+        preventScreenCapture();
+
+        // Allow screen capture when navigating away
+        return () => {
+            ScreenCapture.allowScreenCaptureAsync();
         };
     }, []);
 
