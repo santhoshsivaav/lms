@@ -34,7 +34,7 @@ app.use(morgan('dev'));
 
 // Configure CORS
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://lms-yunus-app.onrender.com/api','*'],
+    origin: ['http://localhost:3000', 'https://lms-yunus-app.onrender.com','https://lms-admin-whta.onrender.com'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
