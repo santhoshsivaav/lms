@@ -12,6 +12,7 @@ const userRoutes = require('./routes/userRoutes');
 const categoryRoutes = require('./routes/categories');
 const User = require('./models/User');
 const fs = require('fs');
+const allUsersRoutes = require('./routes/allusers');
 
 // Load environment variables
 dotenv.config();
@@ -34,7 +35,7 @@ app.use(morgan('dev'));
 
 // Configure CORS
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://lms-yunus-app.onrender.com/api','*'],
+    origin: ['http://localhost:3000', 'https://lms-yunus-app.onrender.com','https://lms-admin-whta.onrender.com'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
@@ -64,32 +65,8 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://lmsyunus:yunus123@lms
     .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.error('MongoDB connection error:', err));
 
-// Direct route for all users - place this BEFORE other routes
-app.get('/api/allusers', async (req, res) => {
-    console.log('=== All Users Route Hit ===');
-    try {
-        console.log('Fetching users from database...');
-        const users = await User.find()
-            .select('-password -subscription -progress -preferences')
-            .sort({ createdAt: -1 });
-
-        console.log(`Found ${users.length} users`);
-        res.json({
-            success: true,
-            count: users.length,
-            data: users
-        });
-    } catch (error) {
-        console.error('Error fetching users:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch users',
-            error: error.message
-        });
-    }
-});
-
 // API Routes
+app.use('/api/allusers', allUsersRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/users', userRoutes);

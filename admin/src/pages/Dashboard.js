@@ -27,6 +27,8 @@ import {
     InputLabel,
     DialogContentText,
 } from '@mui/material';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import Courses from './Courses';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -50,11 +52,18 @@ const Dashboard = () => {
         preferredCategories: []
     });
     const [categories, setCategories] = useState([]);
+    const [showPassword, setShowPassword] = useState(false);
 
     useEffect(() => {
         const token = localStorage.getItem('token');
-        if (!token) {
+        const user = JSON.parse(localStorage.getItem('user'));
+        if (!token || !user) {
             navigate('/login');
+            return;
+        }
+        if (user.role !== 'admin') {
+            setError('You are not authorized to access this page.');
+            setTimeout(() => navigate('/login'), 2000);
             return;
         }
         if (value === 0) {
@@ -173,53 +182,35 @@ const Dashboard = () => {
 
     const handleSubmit = async () => {
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                setError('Authentication token not found. Please login again.');
-                return;
-            }
-
-            console.log('Using token for user update:', token.substring(0, 10) + '...');
-
-            // Use correct API endpoint
+            // Use /api/allusers endpoint for editing user
             const url = editingUser
-                ? `https://lms-yunus-app.onrender.com/api/users/${editingUser._id}`
+                ? `https://lms-yunus-app.onrender.com/api/allusers/${editingUser._id}`
                 : 'https://lms-yunus-app.onrender.com/api/auth/register';
 
-            // Prepare the data to send
             const userData = {
                 name: formData.name,
                 email: formData.email,
                 role: formData.role,
                 preferredCategories: formData.preferredCategories.map(catId => catId.toString())
             };
-
-            // Only include password if it's not empty
             if (formData.password) {
                 userData.password = formData.password;
             }
-
-            console.log('Sending user data:', userData);
-
             const response = await fetch(url, {
                 method: editingUser ? 'PUT' : 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify(userData)
             });
-
             if (response.ok) {
                 fetchUsers();
                 handleCloseDialog();
             } else {
                 const errorData = await response.json().catch(() => ({ message: `Failed with status: ${response.status}` }));
-                console.error('Update user error response:', response.status, errorData);
                 setError(errorData.message || `Failed to save user: ${response.status}`);
             }
         } catch (err) {
-            console.error('Error saving user:', err);
             setError(`An error occurred while saving the user: ${err.message}`);
         }
     };
@@ -234,34 +225,24 @@ const Dashboard = () => {
 
     const handleDeleteUser = async (user) => {
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                setError('Authentication token not found. Please login again.');
+            if (!user || !user._id) {
+                setError('User not found.');
                 return;
             }
-
-            console.log('Deleting user with ID:', user._id);
-            console.log('Using token:', token.substring(0, 10) + '...');
-
-            // Use correct API endpoint
-            const response = await fetch(`https://lms-yunus-app.onrender.com/api/users/${user._id}`, {
+            // Use /api/allusers endpoint for deleting user
+            const response = await fetch(`https://lms-yunus-app.onrender.com/api/allusers/${user._id}`, {
                 method: 'DELETE',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
             });
-
             if (response.ok) {
-                // Remove user from local state
                 setUsers(users.filter(u => u._id !== user._id));
             } else {
                 const errorData = await response.json().catch(() => ({ message: `Failed with status: ${response.status}` }));
-                console.error('Delete user error response:', response.status, errorData);
                 setError(errorData.message || `Failed to delete user: ${response.status}`);
             }
         } catch (err) {
-            console.error('Error deleting user:', err);
             setError(`An error occurred while deleting the user: ${err.message}`);
         }
     };
@@ -310,6 +291,7 @@ const Dashboard = () => {
                                     <TableCell>Email</TableCell>
                                     <TableCell>Role</TableCell>
                                     <TableCell>Preferred Categories</TableCell>
+                                    <TableCell>Actions</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -325,6 +307,14 @@ const Dashboard = () => {
                                                     .map(cat => cat.name)
                                                     .join(', ')
                                                 : 'None'}
+                                        </TableCell>
+                                        <TableCell>
+                                            <IconButton aria-label="edit" onClick={() => handleOpenDialog(user)}>
+                                                <EditIcon />
+                                            </IconButton>
+                                            <IconButton aria-label="delete" onClick={() => { setUserToDelete(user); setDeleteDialogOpen(true); }}>
+                                                <DeleteIcon />
+                                            </IconButton>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -369,11 +359,22 @@ const Dashboard = () => {
                         <TextField
                             fullWidth
                             label="Password"
-                            type="password"
+                            type={showPassword ? 'text' : 'password'}
                             value={formData.password}
                             onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                             helperText={!editingUser ? "Password must be at least 6 characters long and contain a number" : "Leave blank to keep current password"}
                             sx={{ mb: 2 }}
+                            InputProps={{
+                                endAdornment: (
+                                    <IconButton
+                                        aria-label="toggle password visibility"
+                                        onClick={() => setShowPassword(prev => !prev)}
+                                        edge="end"
+                                    >
+                                        {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                    </IconButton>
+                                ),
+                            }}
                         />
                         <FormControl fullWidth sx={{ mb: 2 }}>
                             <InputLabel>Role</InputLabel>
@@ -452,4 +453,4 @@ const Dashboard = () => {
     );
 };
 
-export default Dashboard; 
+export default Dashboard;

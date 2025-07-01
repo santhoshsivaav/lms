@@ -57,7 +57,7 @@ router.put('/:id/subscription', [protect, admin], async (req, res) => {
 });
 
 // Delete user (Admin only)
-router.delete('/:id', [protect, admin], async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
         const user = await User.findById(req.params.id);
         if (!user) {
@@ -89,4 +89,4 @@ router.get('/:id/progress', [protect, admin], async (req, res) => {
     }
 });
 
-module.exports = router; 
+module.exports = router;
